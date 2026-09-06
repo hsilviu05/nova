@@ -1,0 +1,83 @@
+# NOVA local development stack.
+#
+#   docker compose up --build
+#
+# Bring-up order is enforced by health checks, not by `depends_on` alone:
+# the API's migration step needs a Postgres that is actually accepting
+# connections, and `service_started` does not guarantee that.
+
+name: nova
+
+services:
+  postgres:
+    # pgvector build of Postgres 17 — the embeddings in Phase 5 need the
+    # extension, and enabling it in the first migration avoids reordering
+    # migrations later.
+    image: pgvector/pgvector:pg17
+    container_name: nova-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${NOVA_DATABASE__USER:-nova}
+      POSTGRES_PASSWORD: ${NOVA_DATABASE__PASSWORD:-nova_dev_password}
+      POSTGRES_DB: ${NOVA_DATABASE__NAME:-nova}
+      # Deterministic collation so ordering matches across machines and CI.
+      POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=en-US"
+    ports:
+      - "${NOVA_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - nova-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NOVA_DATABASE__USER:-nova} -d ${NOVA_DATABASE__NAME:-nova}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: nova-redis
+    restart: unless-stopped
+    # No persistence: everything in Redis is a rate-limit counter or cache
+    # entry that is cheap to rebuild.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${NOVA_REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    container_name: nova-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NOVA_ENVIRONMENT: ${NOVA_ENVIRONMENT:-local}
+      NOVA_DEBUG: ${NOVA_DEBUG:-false}
+      NOVA_DATABASE__HOST: postgres
+      NOVA_DATABASE__PORT: 5432
+      NOVA_DATABASE__USER: ${NOVA_DATABASE__USER:-nova}
+      NOVA_DATABASE__PASSWORD: ${NOVA_DATABASE__PASSWORD:-nova_dev_password}
+      NOVA_DATABASE__NAME: ${NOVA_DATABASE__NAME:-nova}
+      NOVA_REDIS__HOST: redis
+      NOVA_REDIS__PORT: 6379
+      NOVA_JWT__SECRET_KEY: ${NOVA_JWT__SECRET_KEY:?set NOVA_JWT__SECRET_KEY in .env}
+      NOVA_OBSERVABILITY__LOG_LEVEL: ${NOVA_OBSERVABILITY__LOG_LEVEL:-INFO}
+      NOVA_OBSERVABILITY__LOG_JSON: ${NOVA_OBSERVABILITY__LOG_JSON:-true}
+    ports:
+      - "${NOVA_API_PORT:-8000}:8000"
+    # Migrations run on start, in the same image as the app, so the schema can
+    # never be a version behind the code that queries it.
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn nova.main:create_app --factory --host 0.0.0.0 --port 8000"
+
+volumes:
+  nova-pgdata:
