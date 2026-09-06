@@ -122,6 +122,38 @@ class DeviceSettings(BaseModel):
     max_protocol_violations: int = Field(default=5, ge=1)
 
 
+class AISettings(BaseModel):
+    """AI provider configuration.
+
+    ``offline`` needs no credential and is the default, so the stack starts
+    and the tests run without a key. Selecting ``anthropic`` without one
+    degrades back to offline with a warning rather than refusing to boot.
+    """
+
+    chat_provider: Literal["anthropic", "offline"] = "offline"
+    chat_model: str = "claude-opus-5"
+    anthropic_api_key: SecretStr | None = None
+
+    request_timeout_seconds: float = Field(default=60.0, gt=0)
+    # Replies from a desk companion are a few sentences. A generous cap
+    # would only pay for a runaway.
+    max_reply_tokens: int = Field(default=600, ge=64, le=8192)
+    # Turns of history sent with each request. Enough for continuity,
+    # bounded so cost does not grow without limit as a conversation ages.
+    context_window_messages: int = Field(default=20, ge=2, le=200)
+
+    # Route around a safety refusal by category instead of returning
+    # nothing. A companion going silent reads as broken.
+    enable_refusal_fallbacks: bool = True
+
+    embedding_dimensions: int = Field(default=1536, ge=64, le=4096)
+
+    # AI calls cost real money, so they are limited more tightly than
+    # ordinary reads.
+    message_rate_limit: int = Field(default=30, ge=1)
+    message_rate_limit_window_seconds: int = Field(default=60, ge=1)
+
+
 class ObservabilitySettings(BaseModel):
     """Logging configuration."""
 
@@ -154,6 +186,7 @@ class Settings(BaseSettings):
     jwt: JWTSettings
     security: SecuritySettings = Field(default_factory=SecuritySettings)
     device: DeviceSettings = Field(default_factory=DeviceSettings)
+    ai: AISettings = Field(default_factory=AISettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
 
     @property
