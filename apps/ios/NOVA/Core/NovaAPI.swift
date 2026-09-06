@@ -20,6 +20,13 @@ protocol NovaAPI: Sendable {
     func renameDevice(id: UUID, name: String) async throws -> Device
     func removeDevice(id: UUID) async throws
 
+    func conversations() async throws -> [Conversation]
+    func conversation(id: UUID) async throws -> ConversationDetail
+    func createConversation(title: String?) async throws -> Conversation
+    func deleteConversation(id: UUID) async throws
+    func sendMessage(_ content: String, to conversationID: UUID) async throws
+        -> MessageExchange
+
     func telemetry(deviceID: UUID, limit: Int, eventType: String?) async throws
         -> [TelemetryEvent]
     func send(_ command: DeviceCommand, to deviceID: UUID) async throws -> CommandAccepted
@@ -121,6 +128,52 @@ struct LiveNovaAPI: NovaAPI {
     func removeDevice(id: UUID) async throws {
         try await client.send(
             Request(method: .delete, path: "devices/\(id.uuidString.lowercased())")
+        )
+    }
+
+    // MARK: - Conversations
+
+    func conversations() async throws -> [Conversation] {
+        try await client.send(Request(path: "conversations"))
+    }
+
+    func conversation(id: UUID) async throws -> ConversationDetail {
+        try await client.send(
+            Request(path: "conversations/\(id.uuidString.lowercased())")
+        )
+    }
+
+    func createConversation(title: String?) async throws -> Conversation {
+        try await client.send(
+            Request(
+                method: .post,
+                path: "conversations",
+                body: CreateConversationRequest(title: title)
+            )
+        )
+    }
+
+    func deleteConversation(id: UUID) async throws {
+        try await client.send(
+            Request(
+                method: .delete, path: "conversations/\(id.uuidString.lowercased())"
+            )
+        )
+    }
+
+    /// Send and wait for the whole reply.
+    ///
+    /// The streaming path is `ChatStreamClient`; this exists for callers
+    /// that would rather have one response than parse an event stream.
+    func sendMessage(
+        _ content: String, to conversationID: UUID
+    ) async throws -> MessageExchange {
+        try await client.send(
+            Request(
+                method: .post,
+                path: "conversations/\(conversationID.uuidString.lowercased())/messages",
+                body: SendMessageRequest(content: content)
+            )
         )
     }
 

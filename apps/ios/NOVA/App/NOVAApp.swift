@@ -9,6 +9,7 @@ struct NOVAApp: App {
             RootView()
                 .environment(container.session)
                 .environment(\.novaAPI, container.api)
+                .environment(\.chatStream, container.chatStream)
         }
     }
 }
@@ -25,6 +26,7 @@ final class AppContainer {
     let tokens: TokenStore
     let client: APIClient
     let api: any NovaAPI
+    let chatStream: ChatStreamClient
     let session: SessionStore
 
     init(configuration: APIConfiguration = .fromEnvironment()) {
@@ -36,6 +38,7 @@ final class AppContainer {
         self.tokens = tokens
         self.client = client
         self.api = api
+        self.chatStream = ChatStreamClient(configuration: configuration, tokens: tokens)
         self.session = SessionStore(api: api, tokens: tokens, client: client)
     }
 }
@@ -70,9 +73,20 @@ private struct NovaAPIKey: EnvironmentKey {
     )
 }
 
+private struct ChatStreamKey: EnvironmentKey {
+    static let defaultValue = ChatStreamClient(
+        configuration: .localDevelopment, tokens: TokenStore()
+    )
+}
+
 extension EnvironmentValues {
     var novaAPI: any NovaAPI {
         get { self[NovaAPIKey.self] }
         set { self[NovaAPIKey.self] = newValue }
+    }
+
+    var chatStream: ChatStreamClient {
+        get { self[ChatStreamKey.self] }
+        set { self[ChatStreamKey.self] = newValue }
     }
 }

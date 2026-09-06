@@ -31,6 +31,9 @@ MODELS = {
     "Device": "DeviceRead",
     "TelemetryEvent": "TelemetryRead",
     "CommandAccepted": "CommandAccepted",
+    "Conversation": "ConversationRead",
+    "ConversationDetail": "ConversationDetail",
+    "ChatMessage": "MessageRead",
 }
 
 
