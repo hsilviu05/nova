@@ -113,8 +113,23 @@ Phases 1 and 2 delivered a running, tested backend and device platform:
   ingestion, and owner-issued commands
 - **214 tests**, 96% branch coverage, `ruff` and `mypy --strict` clean
 
+- **iOS app**: SwiftUI client with sign-in, device claiming by typed code,
+  and a home screen showing live status — **written but never compiled**, see
+  below
+
 `scripts/simulate_device.py` drives the entire device lifecycle against a
 running API, so the flow is exercisable before the hardware arrives.
+
+> **On the iOS app.** Everything else here was built and verified in a Linux
+> environment. Swift cannot be: there is no toolchain for it there, and
+> SwiftUI does not build on Linux at all. So the iOS code has never been
+> through a compiler, and the first build will likely need fixes.
+>
+> What *is* verified is the part that would otherwise fail silently. Every
+> model and test fixture was written against JSON captured from a running
+> API, and `scripts/check_ios_contract.py` compares the Swift models against
+> the live OpenAPI schema on every CI run — so a backend change that breaks
+> the client fails the build rather than the app.
 
 Everything above is verified running, not scaffolded. What is *not* built yet
 is listed honestly in the [Roadmap](#roadmap).
@@ -339,8 +354,8 @@ being unreachable.
 |---|---|---|
 | **1** | Backend foundation: API, Postgres, Redis, Docker, migrations, auth, logging | ✅ **Complete** |
 | **2** | Device platform: claim flow, device auth, WebSocket protocol, telemetry | ✅ **Complete** |
-| 3 | iOS foundation: SwiftUI app, navigation, auth, home screen | Next |
-| 4 | AI chat: provider abstraction, conversations, streaming | Planned |
+| **3** | iOS foundation: SwiftUI app, auth, device claiming, home screen | ⚠️ **Written, not compiled** |
+| 4 | AI chat: provider abstraction, conversations, streaming | Next |
 | 5 | Semantic memory: extraction, embeddings, pgvector retrieval | Planned |
 | 6 | Physical robot: servos, animated AMOLED face, audio, proximity, IMU | Planned |
 | 7 | Telemetry and analytics: aggregation, insights screen | Planned |

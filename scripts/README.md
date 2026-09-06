@@ -4,6 +4,7 @@
 |---|---|
 | `check.sh` | Runs lint, format, types, tests, and migration drift — everything CI runs. |
 | `simulate_device.py` | Drives the whole device lifecycle against a running API, standing in for hardware that has not arrived yet. |
+| `check_ios_contract.py` | Compares the Swift models against the API's OpenAPI schema. |
 
 `check.sh` needs the API virtualenv active and a reachable PostgreSQL and
 Redis (`docker compose up -d postgres redis`).
@@ -26,3 +27,19 @@ servo commands are rejected, another user gets 404 on every device route, and
 a factory reset revokes the old credential.
 
 Requires `httpx` and `websockets` (both in the API's dev extras).
+
+## check_ios_contract.py
+
+The iOS app cannot be compiled without a macOS runner, so this is the one
+automated check between a backend schema change and a client that silently
+decodes the wrong thing. It applies the same snake_case conversion the
+decoder uses, then compares each Swift model's properties with the schema it
+has to decode.
+
+```bash
+python scripts/check_ios_contract.py                    # against a running API
+python scripts/check_ios_contract.py openapi.json       # against a saved spec
+```
+
+Non-zero exit on a mismatch. It runs in CI against a schema exported without
+starting a server.

@@ -103,6 +103,42 @@ jobs:
           path: services/api/coverage.xml
           if-no-files-found: ignore
 
+  ios-contract:
+    name: iOS contract
+    runs-on: ubuntu-latest
+    # The iOS app cannot be compiled without a macOS runner, so this is the
+    # one automated check between a backend schema change and a client that
+    # silently decodes the wrong thing.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/api/pyproject.toml
+
+      - name: Install
+        working-directory: services/api
+        run: pip install -e ".[dev]"
+
+      - name: Export the OpenAPI schema
+        working-directory: services/api
+        env:
+          NOVA_JWT__SECRET_KEY: ${{ env.NOVA_JWT__SECRET_KEY }}
+        run: |
+          python - <<'PY'
+          import json
+          from nova.core.config import JWTSettings, Settings
+          from nova.main import create_app
+
+          settings = Settings(environment="test", jwt=JWTSettings(secret_key="x" * 40))
+          json.dump(create_app(settings).openapi(), open("openapi.json", "w"))
+          PY
+
+      - name: Compare Swift models against the schema
+        run: python scripts/check_ios_contract.py services/api/openapi.json
+
   migrations:
     name: Migrations
     runs-on: ubuntu-latest
