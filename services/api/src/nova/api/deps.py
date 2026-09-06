@@ -17,11 +17,13 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from nova.ai.base import ChatProvider
 from nova.core.config import Settings
 from nova.core.errors import AuthenticationError
 from nova.core.security import PasswordHasher, TokenService
 from nova.db.session import session_scope
 from nova.models.user import User
+from nova.repositories.conversation import ConversationRepository, MessageRepository
 from nova.repositories.device import (
     DeviceClaimRepository,
     DeviceCredentialRepository,
@@ -32,6 +34,7 @@ from nova.repositories.refresh_token import RefreshTokenRepository
 from nova.repositories.user import UserRepository
 from nova.services.auth import AuthService
 from nova.services.connections import ConnectionRegistry
+from nova.services.conversation import ChatStreamer, ConversationService
 from nova.services.device import DeviceService
 from nova.services.health import HealthService
 from nova.services.provisioning import ProvisioningService
@@ -158,6 +161,53 @@ def get_device_service(
         credentials=credentials,
         telemetry=telemetry,
         connections=connections,
+    )
+
+
+# -- conversations ------------------------------------------------------------
+
+
+def get_chat_provider(request: Request) -> ChatProvider:
+    return request.app.state.chat_provider  # type: ignore[no-any-return]
+
+
+def get_conversation_repository(session: SessionDep) -> ConversationRepository:
+    return ConversationRepository(session)
+
+
+def get_message_repository(session: SessionDep) -> MessageRepository:
+    return MessageRepository(session)
+
+
+def get_conversation_service(
+    request: Request,
+    conversations: Annotated[ConversationRepository, Depends(get_conversation_repository)],
+    messages: Annotated[MessageRepository, Depends(get_message_repository)],
+    provider: Annotated[ChatProvider, Depends(get_chat_provider)],
+) -> ConversationService:
+    settings: Settings = request.app.state.settings
+    return ConversationService(
+        conversations=conversations,
+        messages=messages,
+        provider=provider,
+        settings=settings.ai,
+    )
+
+
+def get_chat_streamer(
+    request: Request,
+    provider: Annotated[ChatProvider, Depends(get_chat_provider)],
+) -> ChatStreamer:
+    """Build the streamer with the session *factory*, not a session.
+
+    A streaming response body runs after the endpoint returns, by which point
+    the request-scoped session is closed. The streamer opens its own.
+    """
+    settings: Settings = request.app.state.settings
+    return ChatStreamer(
+        session_factory=request.app.state.session_factory,
+        provider=provider,
+        settings=settings.ai,
     )
 
 

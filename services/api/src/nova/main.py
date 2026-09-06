@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from nova import __version__
+from nova.ai.registry import build_chat_provider
 from nova.api.v1.health import router as health_router
 from nova.api.v1.router import router as v1_router
 from nova.core.config import Settings, get_settings
@@ -54,6 +55,9 @@ def _build_lifespan(
         # Device sockets are held in this process. Scaling horizontally means
         # replacing this with a Redis-backed registry -- see ADR 004.
         app.state.connections = InMemoryConnectionRegistry()
+        # One provider for the process: it holds an HTTP client and
+        # connection pool that should not be rebuilt per request.
+        app.state.chat_provider = build_chat_provider(settings.ai)
 
         logger.info("api_started", version=__version__, environment=settings.environment)
         try:
