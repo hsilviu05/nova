@@ -23,6 +23,8 @@ from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession, async_sessionmaker
 
+from nova.ai.base import ChatProvider
+from nova.ai.registry import build_chat_provider
 from nova.core.config import (
     DatabaseSettings,
     JWTSettings,
@@ -59,6 +61,7 @@ def build_test_app(
     session_factory: async_sessionmaker[AsyncSession],
     redis: Redis,
     connections: InMemoryConnectionRegistry | None = None,
+    chat_provider: ChatProvider | None = None,
 ) -> FastAPI:
     """Build an app wired to test fixtures instead of its own lifespan.
 
@@ -75,6 +78,9 @@ def build_test_app(
     app.state.token_service = TokenService(settings.jwt)
     app.state.password_hasher = Argon2PasswordHasher(settings.security)
     app.state.connections = connections or InMemoryConnectionRegistry()
+    # Offline by default, so the suite exercises the whole conversation path
+    # with no API key, no network, and no per-run cost.
+    app.state.chat_provider = chat_provider or build_chat_provider(settings.ai)
     return app
 
 
