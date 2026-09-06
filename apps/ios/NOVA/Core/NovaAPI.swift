@@ -30,6 +30,13 @@ protocol NovaAPI: Sendable {
     func telemetry(deviceID: UUID, limit: Int, eventType: String?) async throws
         -> [TelemetryEvent]
     func send(_ command: DeviceCommand, to deviceID: UUID) async throws -> CommandAccepted
+
+    func memories(category: MemoryCategory?, limit: Int, offset: Int) async throws
+        -> MemoryPage
+    func searchMemories(_ query: String) async throws -> [MemorySearchResult]
+    func updateMemory(id: UUID, _ update: UpdateMemoryRequest) async throws -> Memory
+    func deleteMemory(id: UUID) async throws
+    func forgetEverything() async throws
 }
 
 /// `NovaAPI` over HTTP.
@@ -200,5 +207,43 @@ struct LiveNovaAPI: NovaAPI {
                 body: command
             )
         )
+    }
+
+    // MARK: - Memory
+
+    func memories(
+        category: MemoryCategory? = nil, limit: Int = 50, offset: Int = 0
+    ) async throws -> MemoryPage {
+        var query = ["limit": String(limit), "offset": String(offset)]
+        if let category, category != .unknown {
+            query["category"] = category.rawValue
+        }
+
+        return try await client.send(Request(path: "memories", query: query))
+    }
+
+    func searchMemories(_ query: String) async throws -> [MemorySearchResult] {
+        try await client.send(Request(path: "memories/search", query: ["q": query]))
+    }
+
+    func updateMemory(id: UUID, _ update: UpdateMemoryRequest) async throws -> Memory {
+        try await client.send(
+            Request(
+                method: .patch,
+                path: "memories/\(id.uuidString.lowercased())",
+                body: update
+            )
+        )
+    }
+
+    func deleteMemory(id: UUID) async throws {
+        try await client.send(
+            Request(method: .delete, path: "memories/\(id.uuidString.lowercased())")
+        )
+    }
+
+    /// Clear everything NOVA has learned, without deleting the account.
+    func forgetEverything() async throws {
+        try await client.send(Request(method: .delete, path: "memories"))
     }
 }

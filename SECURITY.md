@@ -206,13 +206,28 @@ away and nothing about who it is.
 | Motion events | Stored | IMU-derived: picked up, tilted, tapped |
 | Voice events | Stored | Structured metadata — not recordings |
 | Conversations | Stored | User-viewable and deletable |
-| Memories | Stored | User-viewable, editable, deletable |
+| Memories | Stored | User-viewable, editable, deletable, and clearable in bulk |
 
 Account deletion cascades to every owned row via `ON DELETE CASCADE`.
 
 Memory extraction is designed to record preferences and context, not
-credentials or identifiers. Users can inspect and delete anything NOVA
-believes about them.
+credentials or identifiers, and it is defended twice: the extraction prompt
+forbids passwords, card and account numbers, government identifiers, precise
+addresses and medical details, and a pattern check then drops anything that
+looks like a secret whatever the model returned. The patterns are narrow on
+purpose — "keeps forgetting their password" is a legitimate memory and is
+kept; "password is hunter2" is not.
+
+That filter is a backstop, not a guarantee. It matches shapes, not meaning,
+and it will not catch a secret phrased as ordinary prose. The controls that
+do not depend on a model behaving are the ones alongside it: every memory is
+visible, editable, and deletable by the person it is about, and
+`DELETE /api/v1/memories` clears the lot without deleting the account.
+
+Retrieval is scoped to the owner in the SQL WHERE clause rather than filtered
+afterwards. Retrieved text goes directly into a model prompt, so this is a
+correctness boundary — it is covered by a test that fails if the clause is
+removed.
 
 ## Threat model
 

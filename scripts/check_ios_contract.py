@@ -34,6 +34,9 @@ MODELS = {
     "Conversation": "ConversationRead",
     "ConversationDetail": "ConversationDetail",
     "ChatMessage": "MessageRead",
+    "Memory": "MemoryRead",
+    "MemoryPage": "MemoryPage",
+    "MemorySearchResult": "MemorySearchResult",
 }
 
 
@@ -72,6 +75,38 @@ def swift_emotions(sources: str) -> set[str]:
     for line in re.findall(r"^\s*case (.+)$", match.group(1), re.M):
         cases.update(part.strip() for part in line.split(","))
     return {case for case in cases if case}
+
+
+def swift_memory_categories(sources: str) -> set[str]:
+    """Cases of MemoryCategory, which mirrors a server Literal.
+
+    ``unknown`` is excluded: it is the app's own fallback for a category the
+    server adds later, not something the API ever sends as a valid value.
+    """
+    # Matched to the enum's closing brace rather than to a blank line, so a
+    # case declared below one is still seen. The four-space indent is what
+    # separates declarations from the `case`s inside the switch bodies.
+    match = re.search(r"enum MemoryCategory\b[^{]*\{(.*?)^\}", sources, re.S | re.M)
+    if match is None:
+        return set()
+
+    cases: set[str] = set()
+    for line in re.findall(r"^    case (.+)$", match.group(1), re.M):
+        cases.update(part.strip() for part in line.split(","))
+    return {case for case in cases if case and case != "unknown"}
+
+
+def check_enum(label: str, server: set[str], app: set[str]) -> bool:
+    """Compare a server Literal with the enum the app mirrors it in."""
+    if not server:
+        return True
+
+    matches = server == app
+    print(f"\n  {label:<16} {'OK' if matches else 'MISMATCH'}")
+    if not matches:
+        print(f"      server only: {sorted(server - app)}")
+        print(f"      app only:    {sorted(app - server)}")
+    return matches
 
 
 def main() -> int:
@@ -129,13 +164,23 @@ def main() -> int:
     server_emotions = set(expression.get("enum", []))
     app_emotions = swift_emotions(sources)
 
-    if server_emotions:
-        matches = server_emotions == app_emotions
-        print(f"\n  {'emotions':<16} {'OK' if matches else 'MISMATCH'}")
-        if not matches:
-            print(f"      server only: {sorted(server_emotions - app_emotions)}")
-            print(f"      app only:    {sorted(app_emotions - server_emotions)}")
-            ok = False
+    ok = check_enum("emotions", server_emotions, app_emotions) and ok
+
+    # The categories the app offers have to be exactly the ones the API will
+    # accept, or a correction saved from the picker comes back a 422.
+    update_category = (
+        schemas.get("MemoryUpdate", {}).get("properties", {}).get("category", {})
+    )
+    server_categories = {
+        value
+        for option in update_category.get("anyOf", [update_category])
+        for value in option.get("enum", []) or []
+        if isinstance(value, str)
+    }
+    ok = (
+        check_enum("categories", server_categories, swift_memory_categories(sources))
+        and ok
+    )
 
     print("\nContract check:", "passed" if ok else "FAILED")
     return 0 if ok else 1

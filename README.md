@@ -201,6 +201,11 @@ Interactive documentation is at `/docs` (disabled in production).
 | `DELETE` | `/api/v1/conversations/{id}` | Delete a conversation. |
 | `POST` | `/api/v1/conversations/{id}/messages` | Send a message, wait for the reply. |
 | `POST` | `/api/v1/conversations/{id}/stream` | Send a message, stream the reply (SSE). |
+| `GET` | `/api/v1/memories` | What NOVA remembers about you. |
+| `GET` | `/api/v1/memories/search` | Search memories by meaning, with scores. |
+| `PATCH` | `/api/v1/memories/{id}` | Correct a memory. Editing the text re-embeds it. |
+| `DELETE` | `/api/v1/memories/{id}` | Forget one thing. |
+| `DELETE` | `/api/v1/memories` | Forget everything, without deleting the account. |
 
 Every non-2xx response uses one envelope, always carrying the request ID that
 appears in the server logs:
@@ -365,8 +370,8 @@ being unreachable.
 | **2** | Device platform: claim flow, device auth, WebSocket protocol, telemetry | ✅ **Complete** |
 | **3** | iOS foundation: SwiftUI app, auth, device claiming, home screen | ⚠️ **Written, not compiled** |
 | **4** | AI chat: provider abstraction, conversations, streaming | ✅ **Backend complete**, iOS uncompiled |
-| 5 | Semantic memory: extraction, embeddings, pgvector retrieval | Next |
-| 6 | Physical robot: servos, animated AMOLED face, audio, proximity, IMU | Planned |
+| **5** | Semantic memory: extraction, embeddings, pgvector retrieval | ✅ **Backend complete**, iOS uncompiled |
+| 6 | Physical robot: servos, animated AMOLED face, audio, proximity, IMU | Next |
 | 7 | Telemetry and analytics: aggregation, insights screen | Planned |
 | 8 | Machine learning: dataset, features, temporal validation, predictions | Planned |
 | 9 | GitHub dev mode: webhooks, CI reactions | Planned |

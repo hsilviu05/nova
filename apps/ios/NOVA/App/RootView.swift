@@ -38,8 +38,8 @@ private struct LaunchView: View {
 
 /// The signed-in navigation.
 ///
-/// Insights and Memory arrive in later phases; showing them now as empty
-/// tabs would promise something that does not exist.
+/// Insights arrives in a later phase; showing it now as an empty tab would
+/// promise something that does not exist.
 struct MainTabView: View {
     let user: User
 
@@ -50,6 +50,9 @@ struct MainTabView: View {
             }
             Tab("Chat", systemImage: "bubble.left.and.bubble.right") {
                 ChatView()
+            }
+            Tab("Memory", systemImage: "brain") {
+                MemoryView()
             }
             Tab("Devices", systemImage: "cpu") {
                 DeviceListView()

@@ -16,6 +16,7 @@ built, but the reasoning disappears unless it is written down.
 | [008](008-amoled-face-hardware.md) | An AMOLED face instead of a camera | Accepted |
 | [009](009-device-claim-flow.md) | Device claiming by on-screen code | Accepted |
 | [010](010-streaming-and-offline-ai.md) | Streaming chat over SSE, with an offline provider | Accepted |
+| [011](011-lexical-embeddings-and-memory-extraction.md) | Lexical embeddings, and extracting memory after the reply | Accepted |
 
 Format: Context, Decision, Alternatives considered, Consequences.
 

@@ -177,7 +177,7 @@ That informs the failure mode: the rate limiter **fails open**. A Redis
 outage should degrade abuse protection, not take login down. It logs a warning
 and allows the request.
 
-## AI provider abstraction (Phase 4)
+## AI provider abstraction
 
 ```
         Conversation service
@@ -197,6 +197,37 @@ Configuration selects the implementation. No business logic imports a vendor
 SDK. This is not speculative generality: speech and vision pricing and quality
 move fast, and running a local model on a home server is a realistic goal for
 this project. See [ADR 002](docs/decisions/002-ai-provider-abstraction.md).
+
+## Semantic memory
+
+```
+  Exchange ──▶ extraction ──▶ scoring ──▶ embedding ──▶ pgvector
+   (after                                                  │
+  the reply)                                               │
+                                                           ▼
+  Next message ──▶ embed query ──▶ nearest, owner-scoped ──┘
+                                        │
+                                        ▼
+                          second system block, after the
+                          persona's cache breakpoint
+```
+
+Extraction runs **after** the response is delivered, as a background task
+with its own database session. It is a second model call, and nobody should
+wait on NOVA deciding what to remember.
+
+Retrieval happens before the reply, scoped to the owner **in the WHERE
+clause**. That is a correctness boundary rather than a filter: the retrieved
+text goes straight into a prompt, so a leak there is a leak into somebody
+else's conversation.
+
+Embeddings come from `EmbeddingProvider`, not from the chat vendor —
+Anthropic has no embeddings endpoint at all, which is exactly the case ADR
+002 separated the interfaces for. The default `LexicalEmbeddingProvider`
+measures shared vocabulary and genuinely retrieves; it does not know that
+"espresso" relates to "coffee". Retrieval quality is capped there until a
+real embedder is configured. See
+[ADR 011](docs/decisions/011-lexical-embeddings-and-memory-extraction.md).
 
 ## Device protocol (Phase 2)
 
@@ -238,7 +269,12 @@ are conservative:
 - Raw audio is **never stored by default**. Storage is opt-in.
 - Telemetry records structured events (`person_detected`, distance,
   interaction start and end), not the audio that produced them.
-- Memory is user-visible, user-editable, and user-deletable.
+- Memory is user-visible, user-editable, and user-deletable, with a
+  separate "forget everything" that does not delete the account —
+  wanting NOVA to stop knowing things about you is a different
+  intention from wanting to stop using it.
+- Extraction is instructed to skip credentials and identifiers, and a
+  pattern check drops anything that looks like a secret regardless.
 - Account deletion cascades to every owned row.
 
 NOVA has no camera ([ADR 008](docs/decisions/008-amoled-face-hardware.md)),
