@@ -96,6 +96,32 @@ class SecuritySettings(BaseModel):
     argon2_parallelism: int = Field(default=1, ge=1)
 
 
+class DeviceSettings(BaseModel):
+    """Device provisioning and connection configuration."""
+
+    # A claim code is read off a small screen and typed by hand, so it cannot
+    # carry much entropy (~29 bits). Everything else here exists to
+    # compensate: a short life, a single use, and rate limiting on the claim
+    # endpoint -- which is the only place a wrong guess is observable, since
+    # a guess that matches no code matches no row either.
+    claim_code_ttl_seconds: int = Field(default=600, ge=60, le=3600)
+
+    # Provisioning is a rare event, so the limits are deliberately tight.
+    provision_rate_limit_attempts: int = Field(default=10, ge=1)
+    provision_rate_limit_window_seconds: int = Field(default=3600, ge=1)
+    claim_rate_limit_attempts: int = Field(default=10, ge=1)
+    claim_rate_limit_window_seconds: int = Field(default=60, ge=1)
+
+    # How often a connected device is expected to report in.
+    heartbeat_interval_seconds: int = Field(default=30, ge=5)
+
+    # Frames larger than this are rejected before parsing. A device sends
+    # small JSON; anything bigger is a bug or an attack.
+    max_frame_bytes: int = Field(default=16384, ge=512)
+    # Consecutive malformed frames tolerated before the socket is closed.
+    max_protocol_violations: int = Field(default=5, ge=1)
+
+
 class ObservabilitySettings(BaseModel):
     """Logging configuration."""
 
@@ -127,6 +153,7 @@ class Settings(BaseSettings):
     redis: RedisSettings = Field(default_factory=RedisSettings)
     jwt: JWTSettings
     security: SecuritySettings = Field(default_factory=SecuritySettings)
+    device: DeviceSettings = Field(default_factory=DeviceSettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
 
     @property
