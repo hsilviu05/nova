@@ -23,6 +23,7 @@ from nova.core.errors import AuthenticationError
 from nova.core.security import PasswordHasher, TokenService
 from nova.db.session import session_scope
 from nova.models.user import User
+from nova.repositories.analytics import AnalyticsRepository
 from nova.repositories.conversation import ConversationRepository, MessageRepository
 from nova.repositories.device import (
     DeviceClaimRepository,
@@ -33,6 +34,7 @@ from nova.repositories.device import (
 from nova.repositories.memory import MemoryRepository
 from nova.repositories.refresh_token import RefreshTokenRepository
 from nova.repositories.user import UserRepository
+from nova.services.analytics import AnalyticsService
 from nova.services.auth import AuthService
 from nova.services.connections import ConnectionRegistry
 from nova.services.conversation import ChatStreamer, ConversationService
@@ -149,6 +151,23 @@ def get_provisioning_service(
         credentials=credentials,
         claims=claims,
         settings=settings.device,
+    )
+
+
+def get_analytics_repository(session: SessionDep) -> AnalyticsRepository:
+    return AnalyticsRepository(session)
+
+
+def get_analytics_service(
+    request: Request,
+    analytics: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
+) -> AnalyticsService:
+    settings: Settings = request.app.state.settings
+    return AnalyticsService(
+        analytics=analytics,
+        # The gap threshold is derived from the interval the device is told
+        # to report at, so changing one cannot leave the other stale.
+        heartbeat_interval_seconds=settings.device.heartbeat_interval_seconds,
     )
 
 

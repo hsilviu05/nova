@@ -133,6 +133,15 @@ class DeviceService:
     async def get_for_owner(self, device_id: uuid.UUID, owner_id: uuid.UUID) -> DeviceRead:
         return DeviceRead.model_validate(await self._require_owned(device_id, owner_id))
 
+    async def require_owned(self, device_id: uuid.UUID, owner_id: uuid.UUID) -> Device:
+        """The ownership check, for callers outside this service.
+
+        Analytics needs exactly this and must not grow its own: two
+        implementations of an ownership boundary is one too many, and the
+        second one is where the bug lives.
+        """
+        return await self._require_owned(device_id, owner_id)
+
     async def update_for_owner(
         self, device_id: uuid.UUID, owner_id: uuid.UUID, payload: DeviceUpdate
     ) -> DeviceRead:

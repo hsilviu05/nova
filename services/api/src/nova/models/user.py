@@ -30,6 +30,15 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     display_name: Mapped[str] = mapped_column(String(80), nullable=False)
 
+    # IANA name, e.g. "Europe/Bucharest". Analytics buckets telemetry by local
+    # hour, and doing that in UTC would put someone's evening in the middle of
+    # their night. Stored as a name rather than an offset so Postgres resolves
+    # daylight saving itself: a fixed offset is wrong for half the year
+    # everywhere that observes it.
+    timezone: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="UTC", server_default="UTC"
+    )
+
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_superuser: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

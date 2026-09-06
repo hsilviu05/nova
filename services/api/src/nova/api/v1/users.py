@@ -23,5 +23,7 @@ async def update_me(
     """Update the authenticated user's mutable profile fields."""
     if payload.display_name is not None:
         current_user.display_name = payload.display_name.strip()
+    if payload.timezone is not None:
+        current_user.timezone = payload.timezone
     await session.flush()
     return UserRead.model_validate(current_user)
