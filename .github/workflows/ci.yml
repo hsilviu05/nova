@@ -1,0 +1,268 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Test-only secret. Real environments supply their own; this exists so the
+  # API can start at all, since there is deliberately no default.
+  NOVA_JWT__SECRET_KEY: ci-secret-key-at-least-thirty-two-characters-long
+  NOVA_ENVIRONMENT: test
+
+defaults:
+  run:
+    working-directory: services/api
+
+jobs:
+  quality:
+    name: Lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/api/pyproject.toml
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check --output-format=github .
+
+      - name: Format
+        run: ruff format --check .
+
+      - name: Types
+        run: mypy
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # pgvector build: the first migration enables the extension.
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: nova
+          POSTGRES_PASSWORD: nova_ci_password
+          POSTGRES_DB: nova_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U nova -d nova_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      NOVA_TEST_DATABASE__HOST: localhost
+      NOVA_TEST_DATABASE__USER: nova
+      NOVA_TEST_DATABASE__PASSWORD: nova_ci_password
+      NOVA_TEST_DATABASE__NAME: nova_test
+      NOVA_TEST_REDIS__HOST: localhost
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/api/pyproject.toml
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Test
+        run: pytest --cov=nova --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: services/api/coverage.xml
+          if-no-files-found: ignore
+
+  migrations:
+    name: Migrations
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: nova
+          POSTGRES_PASSWORD: nova_ci_password
+          POSTGRES_DB: nova
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U nova -d nova"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NOVA_DATABASE__HOST: localhost
+      NOVA_DATABASE__USER: nova
+      NOVA_DATABASE__PASSWORD: nova_ci_password
+      NOVA_DATABASE__NAME: nova
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/api/pyproject.toml
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Apply
+        run: alembic upgrade head
+
+      - name: Models match migrations
+        # Fails when a model changed without a migration, which would
+        # otherwise drift silently until a deploy.
+        run: alembic check
+
+      - name: Downgrade is reversible
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+
+  docker:
+    name: Container build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/api
+          push: false
+          load: true
+          tags: nova-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image starts and serves /health
+        working-directory: .
+        run: |
+          docker run -d --name nova-api-ci \
+            -e NOVA_JWT__SECRET_KEY="$NOVA_JWT__SECRET_KEY" \
+            -p 8000:8000 nova-api:ci \
+            uvicorn nova.main:create_app --factory --host 0.0.0.0 --port 8000
+
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health; then
+              echo "\nAPI is serving"; exit 0
+            fi
+            sleep 2
+          done
+
+          echo "API did not become healthy"
+          docker logs nova-api-ci
+          exit 1
+
+      - name: Stop
+        if: always()
+        working-directory: .
+        run: docker rm -f nova-api-ci || true
+
+  compose:
+    name: Compose stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure environment
+        working-directory: .
+        run: |
+          cp .env.example .env
+          echo "NOVA_JWT__SECRET_KEY=$(openssl rand -base64 48 | tr -d '\n')" >> .env
+
+      - name: Start the stack
+        working-directory: .
+        run: docker compose up -d --build
+
+      - name: Wait for readiness
+        working-directory: .
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/ready; then
+              echo "\nStack is ready"; exit 0
+            fi
+            sleep 2
+          done
+
+          echo "Stack did not become ready"
+          docker compose logs
+          exit 1
+
+      - name: Smoke test the auth flow
+        working-directory: .
+        run: |
+          set -e
+          BASE=http://localhost:8000/api/v1
+          EMAIL="ci-$RANDOM@example.com"
+
+          BODY=$(curl -sf -X POST $BASE/auth/register \
+            -H 'Content-Type: application/json' \
+            -d "{\"email\":\"$EMAIL\",\"password\":\"correct-horse-battery-staple\",\"display_name\":\"CI\"}")
+
+          ACCESS=$(echo "$BODY" | jq -r .tokens.access_token)
+          REFRESH=$(echo "$BODY" | jq -r .tokens.refresh_token)
+
+          curl -sf $BASE/users/me -H "Authorization: Bearer $ACCESS" > /dev/null
+          echo "authenticated request OK"
+
+          NEXT=$(curl -sf -X POST $BASE/auth/refresh \
+            -H 'Content-Type: application/json' \
+            -d "{\"refresh_token\":\"$REFRESH\"}" | jq -r .refresh_token)
+          echo "rotation OK"
+
+          # Replaying the rotated token must revoke the whole family, so the
+          # successor must stop working too.
+          REPLAY=$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/auth/refresh \
+            -H 'Content-Type: application/json' -d "{\"refresh_token\":\"$REFRESH\"}")
+          SUCCESSOR=$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/auth/refresh \
+            -H 'Content-Type: application/json' -d "{\"refresh_token\":\"$NEXT\"}")
+
+          test "$REPLAY" = "401" || { echo "replay should be 401, got $REPLAY"; exit 1; }
+          test "$SUCCESSOR" = "401" || { echo "family should be revoked, got $SUCCESSOR"; exit 1; }
+          echo "reuse detection OK"
+
+      - name: Logs on failure
+        if: failure()
+        working-directory: .
+        run: docker compose logs
+
+      - name: Tear down
+        if: always()
+        working-directory: .
+        run: docker compose down -v

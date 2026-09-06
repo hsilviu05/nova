@@ -1,0 +1,73 @@
+name: Security
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    # Weekly, so newly disclosed advisories surface without a push.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependencies:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        working-directory: services/api
+        run: |
+          pip install -e ".[dev]"
+          pip install pip-audit
+
+      - name: Audit
+        working-directory: services/api
+        run: pip-audit --strict --progress-spinner off
+
+  secrets:
+    name: Secret scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: a secret committed and later removed is still a
+          # leaked secret.
+          fetch-depth: 0
+
+      - name: Scan history
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  static:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        working-directory: services/api
+        run: pip install -e ".[dev]"
+
+      - name: Bandit rules via ruff
+        working-directory: services/api
+        # The S ruleset is bandit's checks. Failing here means a security
+        # lint was introduced without an explicit, justified suppression.
+        run: ruff check --select S --output-format=github .
