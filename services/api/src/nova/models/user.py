@@ -8,6 +8,7 @@ from sqlalchemy import Boolean, CheckConstraint, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from nova.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from nova.models.device import Device
 from nova.models.refresh_token import RefreshToken
 
 
@@ -33,6 +34,11 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     refresh_tokens: Mapped[list[RefreshToken]] = relationship(
         back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    devices: Mapped[list[Device]] = relationship(
+        back_populates="owner",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
