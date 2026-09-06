@@ -1,0 +1,69 @@
+# ---------------------------------------------------------------------------
+# SECRETS — never commit credentials, keys, or environment files.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p8
+*.pfx
+secrets.json
+credentials.json
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# ---------------------------------------------------------------------------
+# Node / Expo (apps/mobile)
+# ---------------------------------------------------------------------------
+node_modules/
+.expo/
+.expo-shared/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+
+# ---------------------------------------------------------------------------
+# ESP-IDF (firmware)
+# ---------------------------------------------------------------------------
+firmware/**/build/
+firmware/**/sdkconfig
+firmware/**/sdkconfig.old
+managed_components/
+
+# ---------------------------------------------------------------------------
+# ML — data and trained artifacts are not source. Model metadata is.
+# ---------------------------------------------------------------------------
+ml/data/raw/
+ml/data/interim/
+ml/data/processed/
+ml/models/*.pkl
+ml/models/*.joblib
+ml/models/*.onnx
+mlruns/
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------------------
+# OS / editor
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
