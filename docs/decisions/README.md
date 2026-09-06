@@ -6,11 +6,16 @@ built, but the reasoning disappears unless it is written down.
 
 | # | Decision | Status |
 |---|---|---|
-| [001](001-mobile-stack.md) | React Native + Expo for the mobile client | Accepted |
+| [001](001-mobile-stack.md) | React Native + Expo for the mobile client | ~~Superseded by 007~~ |
 | [002](002-ai-provider-abstraction.md) | Abstract AI providers behind interfaces | Accepted |
 | [003](003-postgres-pgvector.md) | PostgreSQL + pgvector for memory | Accepted |
 | [004](004-websocket-device-protocol.md) | WebSocket, not MQTT, for the device | Accepted |
 | [005](005-ml-temporal-split.md) | Temporal splits for behavioural ML | Accepted |
 | [006](006-refresh-token-rotation.md) | Rotating refresh tokens with reuse detection | Accepted |
+| [007](007-native-swiftui-client.md) | Native SwiftUI for the mobile client | Accepted |
 
 Format: Context, Decision, Alternatives considered, Consequences.
+
+Superseded ADRs are kept, not deleted. A decision that was reversed is more
+instructive than one that was never questioned — 001 and 007 together show
+what changed and why.

@@ -1,6 +1,12 @@
 # 001 — React Native and Expo for the mobile client
 
-**Status:** Accepted · **Date:** 2026-09-06
+**Status:** Superseded by [007](007-native-swiftui-client.md) · **Date:** 2026-09-06
+
+> **Superseded.** This ADR assumed a generalist developer for whom React
+> Native would be the cheaper path to a good client. That premise was wrong:
+> the author is a working iOS developer, which inverts the central trade-off.
+> Kept unedited as the record of what was decided and why it changed. See
+> [ADR 007](007-native-swiftui-client.md).
 
 ## Context
 

@@ -49,7 +49,7 @@ So NOVA is built as three cooperating systems:
 |---|---|
 | **Device** | An ESP32-S3 creature: camera, microphone, speaker, servos, distance sensor. Senses and reacts, and keeps reacting when the network is gone. |
 | **Backend** | Conversation, semantic memory, telemetry ingestion, analytics, and prediction. The device is thin; this is where the thinking lives. |
-| **Mobile app** | Chat, memory management, device control, and the analytics that make the collected data legible. |
+| **iOS app** | Chat, memory management, device control, and the analytics that make the collected data legible. Native SwiftUI, no third-party dependencies. |
 
 The LLM never touches GPIO. It emits *intent* — `{"emotion": "curious",
 "action": "look_at_user"}` — and a deterministic behaviour engine turns that
@@ -60,8 +60,8 @@ a language model that can break hardware directly.
 
 ```
                     ┌──────────────────────┐
-                    │     NOVA MOBILE      │
-                    │  React Native / Expo │
+                    │      NOVA iOS        │
+                    │   SwiftUI · Swift 6  │
                     │  chat · memory       │
                     │  insights · device   │
                     └──────────┬───────────┘
@@ -267,7 +267,7 @@ only that the pipeline runs.
 
 ```
 nova/
-├── apps/mobile/            React Native + Expo client        (Phase 3)
+├── apps/ios/               Native SwiftUI client             (Phase 3)
 ├── services/api/           FastAPI backend                   ✅ Phase 1
 ├── firmware/nova-esp32/    ESP-IDF firmware, C++             (Phase 2/6)
 ├── ml/                     Data, features, training, models  (Phase 8)
@@ -309,7 +309,7 @@ being unreachable.
 |---|---|---|
 | **1** | Backend foundation: API, Postgres, Redis, Docker, migrations, auth, logging | ✅ **Complete** |
 | 2 | Device platform: registration, device auth, WebSocket protocol, telemetry | Next |
-| 3 | Mobile foundation: Expo app, navigation, auth, home screen | Planned |
+| 3 | iOS foundation: SwiftUI app, navigation, auth, home screen | Planned |
 | 4 | AI chat: provider abstraction, conversations, streaming | Planned |
 | 5 | Semantic memory: extraction, embeddings, pgvector retrieval | Planned |
 | 6 | Physical robot: servos, expressions, LEDs, camera, microphone | Planned |
