@@ -11,10 +11,11 @@ platform**: weeks of real telemetry from a real device, feeding a real
 machine-learning pipeline that predicts when its owner will next interact
 with it.
 
-> **Status: Phase 1 of 10 complete.** The backend foundation — API,
-> persistence, authentication, observability — is built, tested, and running.
-> The device, mobile app, AI layer, and ML pipeline are scheduled phases, not
-> promises already kept. See [Roadmap](#roadmap) for exactly what exists today.
+> **Status: Phases 1–4 of 10.** The backend — API, persistence, auth, the
+> device platform, and conversational AI — is built, tested, and running. The
+> iOS client is written but has never been compiled (see below). The firmware,
+> semantic memory, and ML pipeline are scheduled phases, not promises already
+> kept. See [Roadmap](#roadmap) for exactly what exists today.
 
 ---
 
@@ -95,7 +96,7 @@ Full detail, including the layering rules the backend follows, is in
 
 ## What is built today
 
-Phases 1 and 2 delivered a running, tested backend and device platform:
+Phases 1, 2 and 4 delivered a running, tested backend:
 
 - **FastAPI** application with versioned `/api/v1` routes and OpenAPI docs
 - **PostgreSQL 17 + pgvector**, async SQLAlchemy 2.0, Alembic migrations
@@ -111,11 +112,13 @@ Phases 1 and 2 delivered a running, tested backend and device platform:
 - **Versioned WebSocket protocol**: authenticated at the handshake, every
   frame validated against a discriminated union, heartbeat, telemetry
   ingestion, and owner-issued commands
-- **214 tests**, 96% branch coverage, `ruff` and `mypy --strict` clean
+- **Conversations**: provider-agnostic AI layer, replies streamed over
+  Server-Sent Events, and a partial reply kept when the provider fails or the
+  client disconnects
+- **288 tests**, 96% branch coverage, `ruff` and `mypy --strict` clean
 
-- **iOS app**: SwiftUI client with sign-in, device claiming by typed code,
-  and a home screen showing live status — **written but never compiled**, see
-  below
+Phase 3 added the iOS client — sign-in, device claiming by typed code, a home
+screen, and streaming chat — **written but never compiled**, see below.
 
 `scripts/simulate_device.py` drives the entire device lifecycle against a
 running API, so the flow is exercisable before the hardware arrives.
@@ -192,6 +195,12 @@ Interactive documentation is at `/docs` (disabled in production).
 | `GET` | `/api/v1/devices/{id}/telemetry` | Recent telemetry. |
 | `POST` | `/api/v1/devices/{id}/commands` | Send a command to a connected device. |
 | `WS` | `/api/v1/devices/ws` | The device connection. |
+| `GET` | `/api/v1/conversations` | List your conversations. |
+| `POST` | `/api/v1/conversations` | Start a conversation. |
+| `GET` | `/api/v1/conversations/{id}` | A conversation and its messages. |
+| `DELETE` | `/api/v1/conversations/{id}` | Delete a conversation. |
+| `POST` | `/api/v1/conversations/{id}/messages` | Send a message, wait for the reply. |
+| `POST` | `/api/v1/conversations/{id}/stream` | Send a message, stream the reply (SSE). |
 
 Every non-2xx response uses one envelope, always carrying the request ID that
 appears in the server logs:
@@ -355,8 +364,8 @@ being unreachable.
 | **1** | Backend foundation: API, Postgres, Redis, Docker, migrations, auth, logging | ✅ **Complete** |
 | **2** | Device platform: claim flow, device auth, WebSocket protocol, telemetry | ✅ **Complete** |
 | **3** | iOS foundation: SwiftUI app, auth, device claiming, home screen | ⚠️ **Written, not compiled** |
-| 4 | AI chat: provider abstraction, conversations, streaming | Next |
-| 5 | Semantic memory: extraction, embeddings, pgvector retrieval | Planned |
+| **4** | AI chat: provider abstraction, conversations, streaming | ✅ **Backend complete**, iOS uncompiled |
+| 5 | Semantic memory: extraction, embeddings, pgvector retrieval | Next |
 | 6 | Physical robot: servos, animated AMOLED face, audio, proximity, IMU | Planned |
 | 7 | Telemetry and analytics: aggregation, insights screen | Planned |
 | 8 | Machine learning: dataset, features, temporal validation, predictions | Planned |

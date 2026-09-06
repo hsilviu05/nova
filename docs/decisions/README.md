@@ -15,6 +15,7 @@ built, but the reasoning disappears unless it is written down.
 | [007](007-native-swiftui-client.md) | Native SwiftUI for the mobile client | Accepted |
 | [008](008-amoled-face-hardware.md) | An AMOLED face instead of a camera | Accepted |
 | [009](009-device-claim-flow.md) | Device claiming by on-screen code | Accepted |
+| [010](010-streaming-and-offline-ai.md) | Streaming chat over SSE, with an offline provider | Accepted |
 
 Format: Context, Decision, Alternatives considered, Consequences.
 
