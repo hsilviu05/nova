@@ -72,3 +72,6 @@ Thumbs.db
 # would mean a binary diff on every parameter change.
 hardware/case/stl/
 hardware/case/*.check.stl
+
+# Host test builds for the firmware core.
+firmware/build/

@@ -103,6 +103,27 @@ jobs:
           path: services/api/coverage.xml
           if-no-files-found: ignore
 
+  firmware:
+    name: Firmware core
+    runs-on: ubuntu-latest
+    # Only core/ is built. The ESP-IDF layer needs the Xtensa toolchain and
+    # cannot run here -- which is why the logic worth testing lives in a
+    # part that has no ESP-IDF dependency at all.
+    defaults:
+      run:
+        working-directory: firmware
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S test -B build
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
   ios-contract:
     name: iOS contract
     runs-on: ubuntu-latest
