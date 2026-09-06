@@ -37,6 +37,16 @@ MODELS = {
     "Memory": "MemoryRead",
     "MemoryPage": "MemoryPage",
     "MemorySearchResult": "MemorySearchResult",
+    "Analytics": "AnalyticsRead",
+    "Insights": "InsightsRead",
+    "Insight": "InsightRead",
+    "Coverage": "CoverageRead",
+    "HourBucket": "HourBucket",
+    "DayBucket": "DayBucket",
+    "WeekdayHourBucket": "WeekdayHourBucket",
+    "BatteryPoint": "BatteryPoint",
+    "EventTypeBucket": "EventTypeBucket",
+    "Gap": "GapRead",
 }
 
 
@@ -94,6 +104,30 @@ def swift_memory_categories(sources: str) -> set[str]:
     for line in re.findall(r"^    case (.+)$", match.group(1), re.M):
         cases.update(part.strip() for part in line.split(","))
     return {case for case in cases if case and case != "unknown"}
+
+
+def swift_nested_enum_cases(sources: str, outer: str, inner: str) -> set[str]:
+    """Cases of an enum nested inside a struct, e.g. Insight.Confidence."""
+    outer_body = re.search(
+        rf"^struct {outer}\b[^{{]*\{{(.*?)^\}}", sources, re.S | re.M
+    )
+    if outer_body is None:
+        return set()
+
+    match = re.search(
+        rf"enum {inner}\b[^{{]*\{{(.*?)\n    \}}", outer_body.group(1), re.S
+    )
+    if match is None:
+        return set()
+
+    cases: set[str] = set()
+    for line in re.findall(r"^\s*case (.+)$", match.group(1), re.M):
+        cases.update(part.strip() for part in line.split(","))
+    # A `switch self` inside the enum has `case` lines too. Declarations are
+    # bare identifiers; switch arms start with a dot or carry a colon.
+    return {
+        case for case in cases if case and not case.startswith(".") and ":" not in case
+    }
 
 
 def check_enum(label: str, server: set[str], app: set[str]) -> bool:
@@ -179,6 +213,20 @@ def main() -> int:
     }
     ok = (
         check_enum("categories", server_categories, swift_memory_categories(sources))
+        and ok
+    )
+
+    # Confidence is a server Literal too. A value the app cannot decode
+    # fails the whole insights response, not one card.
+    confidence = (
+        schemas.get("InsightRead", {}).get("properties", {}).get("confidence", {})
+    )
+    ok = (
+        check_enum(
+            "confidence",
+            set(confidence.get("enum", [])),
+            swift_nested_enum_cases(sources, "Insight", "Confidence"),
+        )
         and ok
     )
 

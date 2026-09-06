@@ -229,6 +229,37 @@ measures shared vocabulary and genuinely retrieves; it does not know that
 real embedder is configured. See
 [ADR 011](docs/decisions/011-lexical-embeddings-and-memory-extraction.md).
 
+## Analytics and insights
+
+```
+  device_telemetry ──▶ aggregate in SQL ──▶ charts
+   (UTC instants)      AT TIME ZONE tz          │
+                                                ▼
+                                      insight engine (pure)
+                                                │
+                              ┌─────────────────┴──────────────┐
+                              ▼                                ▼
+                    enough support?                    not enough?
+                    statement + evidence          insufficient_reason
+```
+
+Bucketing happens in **Postgres**, in the owner's IANA timezone. Adding a
+fixed offset in Python is wrong for half the year everywhere that observes
+daylight saving, and wrong in a way that still looks like a number. Both
+transitions are tested against a real database.
+
+The insight engine is pure functions taking plain values — no ORM, no
+session — so its thresholds are exhaustively testable and readable in one
+file. Every statement it produces carries the sample size and the number of
+distinct days behind it, and every one has a minimum below which it returns
+nothing at all.
+
+**Volume is not evidence.** Two hundred detections in a single afternoon is
+one day of observation, and produces no claim about anybody's habits. "Not
+enough data yet" is a normal response with its own reason string, not an
+error and not an empty list. See
+[ADR 012](docs/decisions/012-analytics-in-sql-and-gated-insights.md).
+
 ## Device protocol (Phase 2)
 
 Versioned, strictly validated JSON over WebSocket. Malformed messages are

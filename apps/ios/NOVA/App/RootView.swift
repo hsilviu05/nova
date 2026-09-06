@@ -37,9 +37,6 @@ private struct LaunchView: View {
 }
 
 /// The signed-in navigation.
-///
-/// Insights arrives in a later phase; showing it now as an empty tab would
-/// promise something that does not exist.
 struct MainTabView: View {
     let user: User
 
@@ -53,6 +50,9 @@ struct MainTabView: View {
             }
             Tab("Memory", systemImage: "brain") {
                 MemoryView()
+            }
+            Tab("Insights", systemImage: "chart.bar") {
+                InsightsView()
             }
             Tab("Devices", systemImage: "cpu") {
                 DeviceListView()

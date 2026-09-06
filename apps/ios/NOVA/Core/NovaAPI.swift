@@ -12,7 +12,7 @@ protocol NovaAPI: Sendable {
     func signOut(refreshToken: String) async throws
 
     func currentUser() async throws -> User
-    func updateProfile(displayName: String) async throws -> User
+    func updateProfile(displayName: String?, timezone: String?) async throws -> User
 
     func devices() async throws -> [Device]
     func device(id: UUID) async throws -> Device
@@ -37,6 +37,9 @@ protocol NovaAPI: Sendable {
     func updateMemory(id: UUID, _ update: UpdateMemoryRequest) async throws -> Memory
     func deleteMemory(id: UUID) async throws
     func forgetEverything() async throws
+
+    func analytics(deviceID: UUID, windowDays: Int) async throws -> Analytics
+    func insights(deviceID: UUID, windowDays: Int) async throws -> Insights
 }
 
 /// `NovaAPI` over HTTP.
@@ -92,12 +95,19 @@ struct LiveNovaAPI: NovaAPI {
         try await client.send(Request(path: "users/me"))
     }
 
-    func updateProfile(displayName: String) async throws -> User {
+    /// Both fields are optional; omitted means unchanged.
+    ///
+    /// The timezone matters more than it looks: every hour-of-day figure on
+    /// the insights screen is bucketed server-side in it, so leaving it at
+    /// UTC puts someone's evening in the middle of their night.
+    func updateProfile(
+        displayName: String? = nil, timezone: String? = nil
+    ) async throws -> User {
         try await client.send(
             Request(
                 method: .patch,
                 path: "users/me",
-                body: UpdateProfileRequest(displayName: displayName)
+                body: UpdateProfileRequest(displayName: displayName, timezone: timezone)
             )
         )
     }
@@ -245,5 +255,25 @@ struct LiveNovaAPI: NovaAPI {
     /// Clear everything NOVA has learned, without deleting the account.
     func forgetEverything() async throws {
         try await client.send(Request(method: .delete, path: "memories"))
+    }
+
+    // MARK: - Analytics
+
+    func analytics(deviceID: UUID, windowDays: Int = 30) async throws -> Analytics {
+        try await client.send(
+            Request(
+                path: "devices/\(deviceID.uuidString.lowercased())/analytics",
+                query: ["window_days": String(windowDays)]
+            )
+        )
+    }
+
+    func insights(deviceID: UUID, windowDays: Int = 30) async throws -> Insights {
+        try await client.send(
+            Request(
+                path: "devices/\(deviceID.uuidString.lowercased())/insights",
+                query: ["window_days": String(windowDays)]
+            )
+        )
     }
 }

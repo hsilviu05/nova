@@ -17,6 +17,7 @@ built, but the reasoning disappears unless it is written down.
 | [009](009-device-claim-flow.md) | Device claiming by on-screen code | Accepted |
 | [010](010-streaming-and-offline-ai.md) | Streaming chat over SSE, with an offline provider | Accepted |
 | [011](011-lexical-embeddings-and-memory-extraction.md) | Lexical embeddings, and extracting memory after the reply | Accepted |
+| [012](012-analytics-in-sql-and-gated-insights.md) | Aggregation in SQL, and insights that refuse to guess | Accepted |
 
 Format: Context, Decision, Alternatives considered, Consequences.
 

@@ -95,9 +95,20 @@ final class SessionStore {
     }
 
     func updateDisplayName(_ name: String) async {
+        await updateProfile(displayName: name, timezone: nil)
+    }
+
+    /// Change the timezone every analytics figure is bucketed in.
+    func updateTimezone(_ identifier: String) async {
+        await updateProfile(displayName: nil, timezone: identifier)
+    }
+
+    private func updateProfile(displayName: String?, timezone: String?) async {
         guard case .signedIn = state else { return }
         do {
-            state = .signedIn(try await api.updateProfile(displayName: name))
+            state = .signedIn(
+                try await api.updateProfile(displayName: displayName, timezone: timezone)
+            )
         } catch let apiError as APIError {
             error = apiError
         } catch {

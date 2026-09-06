@@ -39,11 +39,18 @@ enum JSONCoding {
     }()
 }
 
-/// ISO-8601 parsing that tolerates a missing fractional part.
+/// ISO-8601 parsing across the three shapes this API actually emits.
 ///
-/// The API emits microseconds, but a timestamp landing exactly on a whole
-/// second serialises without them — rare, and a crash the one time it
-/// happens. Both forms are accepted.
+/// 1. Microsecond timestamps — `2026-09-06T15:42:28.579713Z` — which the
+///    built-in `.iso8601` strategy does not parse at all.
+/// 2. Timestamps landing exactly on a whole second, which serialise without
+///    a fractional part. Rare, and a crash the one time it happens.
+/// 3. Bare calendar dates — `2026-08-17` — which analytics uses for daily
+///    buckets, because a local calendar day is a date and not an instant.
+///
+/// The third is easy to miss and expensive: `presence_by_day` sits inside the
+/// analytics response, so failing on it does not drop a field, it fails the
+/// whole decode and blanks the insights screen.
 enum ISO8601 {
     private static let withFractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -57,8 +64,22 @@ enum ISO8601 {
         return formatter
     }()
 
+    /// Date-only, resolved at UTC midnight.
+    ///
+    /// The server has already done the timezone work: the value is the local
+    /// calendar date the events fell on. Re-interpreting it in the phone's
+    /// zone would shift a whole day's bar to the one either side of it.
+    private static let dateOnly: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate, .withDashSeparatorInDate]
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter
+    }()
+
     static func date(from string: String) -> Date? {
-        withFractional.date(from: string) ?? withoutFractional.date(from: string)
+        withFractional.date(from: string)
+            ?? withoutFractional.date(from: string)
+            ?? dateOnly.date(from: string)
     }
 
     static func string(from date: Date) -> String {

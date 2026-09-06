@@ -5,6 +5,10 @@ struct User: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     let email: String
     let displayName: String
+    /// IANA name. Every hour-of-day figure on the Insights screen is bucketed
+    /// server-side in this, so it is part of the profile rather than a
+    /// display preference.
+    let timezone: String
     let isActive: Bool
     let createdAt: Date
     let lastLoginAt: Date?
@@ -58,6 +62,9 @@ struct LogoutRequest: Encodable, Sendable {
     let refreshToken: String
 }
 
+/// A profile change. Both fields optional: omitted means unchanged, so the
+/// app sends only what was edited rather than echoing the whole profile back.
 struct UpdateProfileRequest: Encodable, Sendable {
-    let displayName: String
+    var displayName: String?
+    var timezone: String?
 }

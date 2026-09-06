@@ -36,10 +36,28 @@ struct DecodingTests {
         #expect(ISO8601.date(from: "2026-09-06T15:42:28Z") != nil)
     }
 
+    @Test("Parses a bare calendar date")
+    func dateOnly() throws {
+        // Analytics daily buckets are dates, not instants: the server has
+        // already resolved the local calendar day. A parser that only
+        // handles full timestamps fails the entire analytics response, not
+        // just this field.
+        let date = try #require(ISO8601.date(from: "2026-08-17"))
+
+        let parts = Calendar(identifier: .gregorian).dateComponents(
+            in: TimeZone(identifier: "UTC")!, from: date
+        )
+        #expect(parts.year == 2026)
+        #expect(parts.month == 8)
+        #expect(parts.day == 17)
+        #expect(parts.hour == 0)
+    }
+
     @Test("Rejects text that is not a timestamp")
     func rejectsGarbage() {
         #expect(ISO8601.date(from: "not a date") == nil)
         #expect(ISO8601.date(from: "") == nil)
+        #expect(ISO8601.date(from: "2026-13-45") == nil)
     }
 
     // MARK: - Session

@@ -33,13 +33,29 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    NavigationLink {
+                        TimezonePicker(current: user.timezone)
+                    } label: {
+                        LabeledContent("Time zone", value: user.timezone)
+                    }
+                } footer: {
+                    Text(
+                        "Every figure on the Insights screen is grouped by your local hour. "
+                        + "Leaving this on UTC puts your evening in the middle of the night."
+                    )
+                }
+
+                Section {
                     Button("Sign Out", role: .destructive) { isSigningOut = true }
                 }
 
                 Section {
                     LabeledContent("Version", value: Bundle.main.shortVersion)
                 } footer: {
-                    Text("NOVA is a physical AI companion. This is Phase 3 — chat, memory and insights arrive in later releases.")
+                    Text(
+                        "NOVA is a physical AI companion. The robot itself is still "
+                        + "being built; everything here talks to the backend."
+                    )
                 }
             }
             .navigationTitle("Settings")

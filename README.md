@@ -206,6 +206,8 @@ Interactive documentation is at `/docs` (disabled in production).
 | `PATCH` | `/api/v1/memories/{id}` | Correct a memory. Editing the text re-embeds it. |
 | `DELETE` | `/api/v1/memories/{id}` | Forget one thing. |
 | `DELETE` | `/api/v1/memories` | Forget everything, without deleting the account. |
+| `GET` | `/api/v1/devices/{id}/analytics` | Aggregated telemetry, bucketed in your local hours. |
+| `GET` | `/api/v1/devices/{id}/insights` | What the telemetry supports saying — or why it doesn't. |
 
 Every non-2xx response uses one envelope, always carrying the request ID that
 appears in the server logs:
@@ -371,8 +373,8 @@ being unreachable.
 | **3** | iOS foundation: SwiftUI app, auth, device claiming, home screen | ⚠️ **Written, not compiled** |
 | **4** | AI chat: provider abstraction, conversations, streaming | ✅ **Backend complete**, iOS uncompiled |
 | **5** | Semantic memory: extraction, embeddings, pgvector retrieval | ✅ **Backend complete**, iOS uncompiled |
-| 6 | Physical robot: servos, animated AMOLED face, audio, proximity, IMU | Next |
-| 7 | Telemetry and analytics: aggregation, insights screen | Planned |
+| **6** | Physical robot: servos, animated AMOLED face, audio, proximity, IMU | ⏳ **Behaviour core done and tested**; drivers and ESP-IDF layer next |
+| **7** | Telemetry and analytics: aggregation, insights screen | ✅ **Backend complete**, iOS uncompiled |
 | 8 | Machine learning: dataset, features, temporal validation, predictions | Planned |
 | 9 | GitHub dev mode: webhooks, CI reactions | Planned |
 | 10 | Production hardening: security review, performance, deployment | Planned |
