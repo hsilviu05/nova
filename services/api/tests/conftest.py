@@ -18,6 +18,7 @@ import uuid
 from collections.abc import AsyncIterator
 
 import pytest
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession, async_sessionmaker
@@ -35,6 +36,7 @@ from nova.db.base import Base
 from nova.db.redis import create_redis
 from nova.db.session import create_engine
 from nova.main import create_app
+from nova.services.connections import InMemoryConnectionRegistry
 
 # Long enough to satisfy the 32-character minimum; test-only, never deployed.
 TEST_JWT_SECRET = "test-secret-key-for-nova-suite-do-not-use-in-production"
@@ -48,6 +50,32 @@ def _test_database_settings() -> DatabaseSettings:
         password=os.getenv("NOVA_TEST_DATABASE__PASSWORD", "nova_dev_password"),  # type: ignore[arg-type]
         name=os.getenv("NOVA_TEST_DATABASE__NAME", "nova_test"),
     )
+
+
+def build_test_app(
+    settings: Settings,
+    *,
+    engine: AsyncEngine,
+    session_factory: async_sessionmaker[AsyncSession],
+    redis: Redis,
+    connections: InMemoryConnectionRegistry | None = None,
+) -> FastAPI:
+    """Build an app wired to test fixtures instead of its own lifespan.
+
+    Every client fixture goes through here. When the application grows a new
+    piece of ``app.state``, it is added once rather than in each fixture --
+    which is how a missing ``connections`` registry first showed up as three
+    identical failures.
+    """
+    app = create_app(settings)
+    app.state.settings = settings
+    app.state.engine = engine
+    app.state.session_factory = session_factory
+    app.state.redis = redis
+    app.state.token_service = TokenService(settings.jwt)
+    app.state.password_hasher = Argon2PasswordHasher(settings.security)
+    app.state.connections = connections or InMemoryConnectionRegistry()
+    return app
 
 
 @pytest.fixture(scope="session")
@@ -152,14 +180,9 @@ async def client(
     The app is built without its lifespan so that ``app.state`` points at the
     fixtures above instead of opening its own connections.
     """
-    app = create_app(settings)
-    app.state.settings = settings
-    app.state.engine = engine
-    app.state.session_factory = session_factory
-    app.state.redis = redis_client
-    app.state.token_service = TokenService(settings.jwt)
-    app.state.password_hasher = Argon2PasswordHasher(settings.security)
-
+    app = build_test_app(
+        settings, engine=engine, session_factory=session_factory, redis=redis_client
+    )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://nova.test") as http_client:
         yield http_client
@@ -206,14 +229,9 @@ async def throttled_client(
     throttled.security.auth_rate_limit_attempts = 3
     throttled.security.auth_rate_limit_window_seconds = 60
 
-    app = create_app(throttled)
-    app.state.settings = throttled
-    app.state.engine = engine
-    app.state.session_factory = session_factory
-    app.state.redis = redis_client
-    app.state.token_service = TokenService(throttled.jwt)
-    app.state.password_hasher = Argon2PasswordHasher(throttled.security)
-
+    app = build_test_app(
+        throttled, engine=engine, session_factory=session_factory, redis=redis_client
+    )
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://nova.test"
     ) as http_client:
@@ -243,14 +261,12 @@ async def degraded_client(
     unreachable_redis: Redis,
 ) -> AsyncIterator[AsyncClient]:
     """A client whose app has a working database but no reachable Redis."""
-    app = create_app(settings)
-    app.state.settings = settings
-    app.state.engine = engine
-    app.state.session_factory = session_factory
-    app.state.redis = unreachable_redis
-    app.state.token_service = TokenService(settings.jwt)
-    app.state.password_hasher = Argon2PasswordHasher(settings.security)
-
+    app = build_test_app(
+        settings,
+        engine=engine,
+        session_factory=session_factory,
+        redis=unreachable_redis,
+    )
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://nova.test"
     ) as http_client:
