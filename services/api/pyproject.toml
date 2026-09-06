@@ -1,0 +1,129 @@
+[project]
+name = "nova-api"
+version = "0.1.0"
+description = "NOVA backend API — multimodal AI companion and behavioral intelligence platform"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+dependencies = [
+    # Web framework and ASGI server.
+    "fastapi>=0.115,<0.117",
+    "uvicorn[standard]>=0.34,<0.36",
+    # Validation and configuration. pydantic-settings gives typed, validated
+    # env parsing; os.environ alone gives neither.
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.6,<3",
+    "email-validator>=2.2,<3",
+    # Persistence. asyncpg is the async driver; a sync driver would block the
+    # event loop on every query.
+    "sqlalchemy[asyncio]>=2.0.36,<2.1",
+    "asyncpg>=0.30,<0.31",
+    "alembic>=1.14,<2",
+    # Redis for rate limiting and ephemeral state. redis-py ships asyncio.
+    "redis>=5.2,<7",
+    # Security. argon2id is the OWASP first-choice password KDF; PyJWT signs
+    # and verifies the access tokens.
+    "argon2-cffi>=23.1,<26",
+    "pyjwt>=2.10,<3",
+    # Structured logging with contextvar-bound request IDs.
+    "structlog>=24.4,<26",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.24,<1.3",
+    "pytest-cov>=6.0,<8",
+    "httpx>=0.28,<0.29",
+    "ruff>=0.8,<0.15",
+    "mypy>=1.13,<2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nova"]
+
+# ---------------------------------------------------------------------------
+# Lint / format
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "B",        # bugbear
+    "UP",       # pyupgrade
+    "ASYNC",    # async correctness
+    "S",        # bandit security
+    "C4",       # comprehensions
+    "SIM",      # simplify
+    "RUF",
+]
+ignore = [
+    "S101",  # assert — pytest relies on it
+    "B008",  # function call in default arg — this is how FastAPI Depends works
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106"]  # hardcoded test passwords are intentional
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+packages = ["nova"]
+strict = true
+plugins = ["pydantic.mypy"]
+warn_unused_ignores = true
+disallow_untyped_decorators = false
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# Fixtures and tests must share one event loop: the session-scoped engine and
+# Redis client hold connections bound to the loop that created them, and a
+# per-test loop would make every one of them "attached to a different loop".
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+addopts = "-q --strict-markers"
+markers = [
+    "integration: requires a live PostgreSQL and Redis",
+]
+
+# ---------------------------------------------------------------------------
+# Coverage
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["nova"]
+branch = true
+# SQLAlchemy's asyncio layer resumes coroutines inside greenlets. Without
+# this, every line after the first `await` on a repository call is reported
+# unexecuted, which understated services/auth.py by roughly half.
+concurrency = ["greenlet", "thread"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+]
