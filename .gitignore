@@ -67,3 +67,8 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# Rendered STLs. Regenerate with `make` in hardware/case; committing them
+# would mean a binary diff on every parameter change.
+hardware/case/stl/
+hardware/case/*.check.stl

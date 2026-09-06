@@ -10,7 +10,7 @@ Hardware reasoning is in
 
 | # | Part | Qty | Est. | Notes |
 |---|---|---|---|---|
-| 1 | **Waveshare ESP32-S3-Touch-AMOLED-2.06** | 1 | €45–55 | Get the **without-battery** SKU. Both exist; V1 runs wired. |
+| 1 | **Waveshare ESP32-S3-Touch-AMOLED-2.06** | 1 | **$28–33 direct** | Get the **without-battery** SKU. Both exist; V1 runs wired. Buy from waveshare.com — see below. |
 | 2 | **USB-C cable, data-capable** | 1 | €5 | Charge-only cables cost everyone half an hour once. |
 
 The board carries the display, touch, microphone array, speaker, ES8311 audio
@@ -49,13 +49,17 @@ builds like this.
 
 | | |
 |---|---|
-| Core | €50–60 |
+| Core | €30–40 (direct) / €75+ (reseller) |
 | Peripherals | €19–27 |
 | Power | €9 |
 | Assembly | €22 |
-| **Total** | **€100–118** |
+| **Total** | **€80–105** (direct) / **€125+** (reseller) |
 
-Above the original €90–100 target, driven by the controller. The alternative —
+A Romanian-language version of this list, with per-shop pricing, cheaper
+alternatives and a suggested ordering sequence, is in
+[LISTA-CUMPARATURI.md](LISTA-CUMPARATURI.md).
+
+Within the original €90–100 target when the board is bought direct. The alternative —
 a cheaper board plus an external microphone, amplifier, speaker, LEDs, and
 buttons — costs less in parts and considerably more in wiring, integration,
 and risk.
@@ -65,9 +69,14 @@ is stable; the camera is a V2 decision documented in ADR 008.
 
 ## Buying notes
 
-- **Check more than one Romanian seller.** The 1.64" variant was listed at
-  161,75 RON on Skroutz against 350,61 RON on eMAG — 2.31× for the same part.
-  Verify this SKU across both before ordering.
+- **Buy the board direct from Waveshare.** The official price is
+  [$27.99–32.99](https://www.waveshare.com/esp32-s3-touch-amoled-2.06.htm) —
+  roughly 130–155 RON, against ~350 RON from a Romanian reseller. Even with
+  $15–25 shipping it is the single largest saving available on this list.
+  The cost is 2–4 weeks of delivery and possible customs handling.
+- **Check more than one Romanian seller for the rest.** The 1.64" variant was
+  listed at 161,75 RON on Skroutz against 350,61 RON on eMAG — 2.31× for the
+  same part. The same spread applies to the small modules.
 - **Do you own a soldering iron?** If not, add €30–50. Items 3, 5, and 8 all
   need one regardless of which board you choose.
 
