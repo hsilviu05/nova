@@ -22,10 +22,19 @@ from nova.core.errors import AuthenticationError
 from nova.core.security import PasswordHasher, TokenService
 from nova.db.session import session_scope
 from nova.models.user import User
+from nova.repositories.device import (
+    DeviceClaimRepository,
+    DeviceCredentialRepository,
+    DeviceRepository,
+    DeviceTelemetryRepository,
+)
 from nova.repositories.refresh_token import RefreshTokenRepository
 from nova.repositories.user import UserRepository
 from nova.services.auth import AuthService
+from nova.services.connections import ConnectionRegistry
+from nova.services.device import DeviceService
 from nova.services.health import HealthService
+from nova.services.provisioning import ProvisioningService
 from nova.services.rate_limit import RateLimiter
 
 # auto_error=False so a missing header raises NOVA's AuthenticationError and
@@ -96,6 +105,60 @@ def get_health_service(
     redis: Annotated[Redis, Depends(get_redis)],
 ) -> HealthService:
     return HealthService(engine=engine, redis=redis)
+
+
+# -- devices ------------------------------------------------------------------
+
+
+def get_connection_registry(request: Request) -> ConnectionRegistry:
+    return request.app.state.connections  # type: ignore[no-any-return]
+
+
+def get_device_repository(session: SessionDep) -> DeviceRepository:
+    return DeviceRepository(session)
+
+
+def get_device_credential_repository(
+    session: SessionDep,
+) -> DeviceCredentialRepository:
+    return DeviceCredentialRepository(session)
+
+
+def get_device_claim_repository(session: SessionDep) -> DeviceClaimRepository:
+    return DeviceClaimRepository(session)
+
+
+def get_device_telemetry_repository(session: SessionDep) -> DeviceTelemetryRepository:
+    return DeviceTelemetryRepository(session)
+
+
+def get_provisioning_service(
+    request: Request,
+    devices: Annotated[DeviceRepository, Depends(get_device_repository)],
+    credentials: Annotated[DeviceCredentialRepository, Depends(get_device_credential_repository)],
+    claims: Annotated[DeviceClaimRepository, Depends(get_device_claim_repository)],
+) -> ProvisioningService:
+    settings: Settings = request.app.state.settings
+    return ProvisioningService(
+        devices=devices,
+        credentials=credentials,
+        claims=claims,
+        settings=settings.device,
+    )
+
+
+def get_device_service(
+    devices: Annotated[DeviceRepository, Depends(get_device_repository)],
+    credentials: Annotated[DeviceCredentialRepository, Depends(get_device_credential_repository)],
+    telemetry: Annotated[DeviceTelemetryRepository, Depends(get_device_telemetry_repository)],
+    connections: Annotated[ConnectionRegistry, Depends(get_connection_registry)],
+) -> DeviceService:
+    return DeviceService(
+        devices=devices,
+        credentials=credentials,
+        telemetry=telemetry,
+        connections=connections,
+    )
 
 
 def get_rate_limiter(redis: Annotated[Redis, Depends(get_redis)]) -> RateLimiter:

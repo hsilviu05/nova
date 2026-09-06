@@ -23,6 +23,7 @@ from nova.db.redis import create_redis
 from nova.db.session import create_engine, create_session_factory
 from nova.middleware.errors import register_exception_handlers
 from nova.middleware.request_context import RequestContextMiddleware
+from nova.services.connections import InMemoryConnectionRegistry
 
 logger = get_logger(__name__)
 
@@ -50,6 +51,9 @@ def _build_lifespan(
         app.state.redis = redis
         app.state.token_service = TokenService(settings.jwt)
         app.state.password_hasher = Argon2PasswordHasher(settings.security)
+        # Device sockets are held in this process. Scaling horizontally means
+        # replacing this with a Redis-backed registry -- see ADR 004.
+        app.state.connections = InMemoryConnectionRegistry()
 
         logger.info("api_started", version=__version__, environment=settings.environment)
         try:
