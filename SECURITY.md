@@ -1,7 +1,6 @@
 # Security
 
-NOVA sits on a desk with a camera and a microphone pointed at its owner. That
-sets the bar.
+NOVA sits on a desk with a microphone pointed at its owner. That sets the bar.
 
 ## Reporting a vulnerability
 
@@ -151,13 +150,17 @@ recover on their next refresh instead of being signed out.
 
 ## Privacy
 
-The camera and microphone drive the defaults:
+The microphone drives the defaults. **NOVA has no camera**
+([ADR 008](docs/decisions/008-amoled-face-hardware.md)) — presence is a
+time-of-flight distance reading, which can establish that something is 72 cm
+away and nothing about who it is.
 
 | Data | Default | Notes |
 |---|---|---|
-| Raw video | **Not stored** | Opt-in only |
 | Raw audio | **Not stored** | Opt-in only |
-| Vision events | Stored | Structured (`person_detected`, confidence, distance) — not frames |
+| Video | **N/A** | No camera exists |
+| Presence events | Stored | Structured (`person_detected`, distance) — a range measurement, not an identity |
+| Motion events | Stored | IMU-derived: picked up, tilted, tapped |
 | Voice events | Stored | Structured metadata — not recordings |
 | Conversations | Stored | User-viewable and deletable |
 | Memories | Stored | User-viewable, editable, deletable |

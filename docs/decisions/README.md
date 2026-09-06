@@ -13,6 +13,7 @@ built, but the reasoning disappears unless it is written down.
 | [005](005-ml-temporal-split.md) | Temporal splits for behavioural ML | Accepted |
 | [006](006-refresh-token-rotation.md) | Rotating refresh tokens with reuse detection | Accepted |
 | [007](007-native-swiftui-client.md) | Native SwiftUI for the mobile client | Accepted |
+| [008](008-amoled-face-hardware.md) | An AMOLED face instead of a camera | Accepted |
 
 Format: Context, Decision, Alternatives considered, Consequences.
 

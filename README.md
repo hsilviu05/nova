@@ -47,7 +47,7 @@ So NOVA is built as three cooperating systems:
 
 | System | Role |
 |---|---|
-| **Device** | An ESP32-S3 creature: camera, microphone, speaker, servos, distance sensor. Senses and reacts, and keeps reacting when the network is gone. |
+| **Device** | An ESP32-S3 creature with an AMOLED face: microphone, speaker, servos, distance sensor, motion sensor. Senses and reacts, and keeps reacting when the network is gone. |
 | **Backend** | Conversation, semantic memory, telemetry ingestion, analytics, and prediction. The device is thin; this is where the thinking lives. |
 | **iOS app** | Chat, memory management, device control, and the analytics that make the collected data legible. Native SwiftUI, no third-party dependencies. |
 
@@ -84,8 +84,9 @@ a language model that can break hardware directly.
                                               │ WebSocket
                                   ┌───────────▼───────────┐
                                   │    NOVA ESP32-S3      │
-                                  │ camera · mic · speaker│
-                                  │ servos · ToF · LEDs   │
+                                  │  AMOLED face · touch  │
+                                  │ mic · speaker · IMU   │
+                                  │   servos · ToF        │
                                   └───────────────────────┘
 ```
 
@@ -208,22 +209,32 @@ More in [SECURITY.md](SECURITY.md).
 
 ## Hardware
 
-Target build cost is roughly €50–70, leaving budget for the iteration that a
-first mechanical design always needs.
+Roughly €100–118 all in. Full list with quantities and buying notes in
+[`hardware/BOM.md`](hardware/BOM.md).
 
 | Part | Choice | Why |
 |---|---|---|
-| Controller | Seeed XIAO ESP32-S3 Sense | ESP32-S3, WiFi, BLE, **camera and microphone on board**, PSRAM. One board replaces three purchases. |
-| Movement | 2–3× SG90 micro servo | Head yaw and pitch. Expressive enough; cheap enough to break. |
-| Distance | VL53L0X time-of-flight | Presence and approach detection, robust to lighting. |
-| Audio | MAX98357A + 4Ω speaker | I²S amplifier; clean digital path from the ESP32. |
-| Interaction | 2 buttons, status LEDs | Physical input and eye/status expression. |
-| Power | USB-C | **No battery in V1.** Batteries are added once the wired version works, not before. |
+| Controller | Waveshare ESP32-S3-Touch-AMOLED-2.06 | 410×502 AMOLED touch face, **microphone, speaker, and ES8311 codec on board**, plus a 6-axis IMU and RTC. One board is the face, the ears, and the voice. |
+| Movement | 3× SG90 micro servo | Head yaw and pitch. The third is because SG90 gears strip. |
+| Servo driver | PCA9685 over I²C | **Required.** The controller reserves only I²C, UART, and USB pads — there is no free PWM GPIO. |
+| Distance | VL53L0X time-of-flight | Presence, approach, and dwell. This is what emits `person_detected`. |
+| Power | USB-C, plus a separate 5 V rail for servos | **No battery in V1.** Servos never draw from the board's regulator. |
+
+**NOVA has no camera.** In this class of hardware a camera and a display are
+mutually exclusive — both want the same pins — so the choice was sight or a
+face. The face won: emotional presence is the product, an AMOLED's true black
+makes drawn eyes read as a face rather than a screen, and ESP32-class vision
+was always going to mean streaming frames to the backend at a few fps.
+
+Crucially this costs nothing in the data-science story, because presence and
+distance come from the time-of-flight sensor rather than from vision. The
+reasoning, and what it would take to add a camera later, is in
+[ADR 008](docs/decisions/008-amoled-face-hardware.md).
 
 The body is ~12–15 cm, printed on a Bambu Lab printer. Not humanoid — a
 small futuristic creature, original design. V1 does **not** walk: legged
-locomotion costs most of the mechanical budget and buys the least. Expressive
-head movement, vision, voice, and telemetry come first.
+locomotion costs most of the mechanical budget and buys the least. An
+expressive face, voice, movement, and telemetry come first.
 
 Design files land in [`hardware/`](hardware/) during Phase 6.
 
@@ -236,7 +247,7 @@ The device emits structured telemetry:
   "timestamp": "2026-09-06T19:32:14Z",
   "device_id": "nova-001",
   "event": "person_detected",
-  "confidence": 0.94,
+  "source": "time_of_flight",
   "distance_cm": 72,
   "head_rotation": 14,
   "emotion": "curious",
@@ -312,7 +323,7 @@ being unreachable.
 | 3 | iOS foundation: SwiftUI app, navigation, auth, home screen | Planned |
 | 4 | AI chat: provider abstraction, conversations, streaming | Planned |
 | 5 | Semantic memory: extraction, embeddings, pgvector retrieval | Planned |
-| 6 | Physical robot: servos, expressions, LEDs, camera, microphone | Planned |
+| 6 | Physical robot: servos, animated AMOLED face, audio, proximity, IMU | Planned |
 | 7 | Telemetry and analytics: aggregation, insights screen | Planned |
 | 8 | Machine learning: dataset, features, temporal validation, predictions | Planned |
 | 9 | GitHub dev mode: webhooks, CI reactions | Planned |

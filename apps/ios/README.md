@@ -38,8 +38,11 @@ inputs, not a submission afterthought. At minimum:
 - `NSLocalNetworkUsageDescription` — only if the app reaches the ESP32
   directly over the LAN rather than through the backend
 
-Nothing here needs camera access: the camera lives on the device, and frames
-reach the app through the API.
+No camera access is needed: the device has no camera
+([ADR 008](../../docs/decisions/008-amoled-face-hardware.md)). If computer
+vision is ever added to NOVA, the iPhone's camera and the Vision framework are
+the better home for it — far more capable hardware than an ESP32 — and that is
+the point at which `NSCameraUsageDescription` would become necessary.
 
 ## Why native rather than React Native
 

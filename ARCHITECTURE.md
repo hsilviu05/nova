@@ -221,21 +221,29 @@ exchange for a fan-out topology NOVA does not have. See
 ## Offline behaviour
 
 The firmware must stay alive when the backend is not. On disconnect the device
-enters `OFFLINE` and runs a local state machine: idle animations, proximity
-reactions, button responses. A companion that freezes when the WiFi drops is a
-companion that feels broken.
+enters `OFFLINE` and runs a local state machine: idle eye animation, proximity
+reactions, touch and motion responses. A companion that freezes when the WiFi
+drops is a companion that feels broken. The onboard RTC keeps time-aware
+behaviour working without a backend round trip.
 
 State machine: `IDLE → LISTENING → THINKING → SPEAKING`, plus `CURIOUS`,
-`HAPPY`, `CONFUSED`, `ALERT`, `SLEEPING`, `OFFLINE`. Each state drives eyes,
-head, LEDs, and audio.
+`HAPPY`, `CONFUSED`, `ALERT`, `SLEEPING`, `OFFLINE`. Each state drives the
+animated face, head position, and audio together.
 
 ## Privacy
 
-The camera and microphone are the most sensitive components in the system, so
-the defaults are conservative:
+The microphone is the most sensitive component in the system, so the defaults
+are conservative:
 
-- Raw audio and video are **never stored by default**. Storage is opt-in.
-- Telemetry records structured events (`person_detected`, confidence,
-  distance), not the frames that produced them.
+- Raw audio is **never stored by default**. Storage is opt-in.
+- Telemetry records structured events (`person_detected`, distance,
+  interaction start and end), not the audio that produced them.
 - Memory is user-visible, user-editable, and user-deletable.
 - Account deletion cascades to every owned row.
+
+NOVA has no camera ([ADR 008](docs/decisions/008-amoled-face-hardware.md)),
+which removes the most invasive sensor a desk device can carry. Presence
+detection is a time-of-flight distance reading — it can tell that something is
+72 cm away, and nothing about who or what it is. That is a meaningful privacy
+property, not merely a consequence of the hardware choice, and it should
+survive any later decision to add a camera.
