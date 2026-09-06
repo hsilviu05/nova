@@ -1,0 +1,77 @@
+# XcodeGen spec.
+#
+#   brew install xcodegen
+#   xcodegen generate
+#   open NOVA.xcodeproj
+#
+# The project file is generated rather than committed: an .xcodeproj is a
+# large generated artefact that conflicts on almost every merge, and this
+# file says the same thing in twenty readable lines.
+#
+# If you would rather not install XcodeGen, create an iOS App target named
+# NOVA in Xcode and add the NOVA/ directory to it — the sources have no
+# dependency on this file.
+
+name: NOVA
+
+options:
+  bundleIdPrefix: com.nova
+  deploymentTarget:
+    # Independent of the SDK: App Store Connect requires building against the
+    # iOS 26 SDK, while nothing in this app needs anything newer than 18.
+    # @Observable needs 17+, Swift Charts 16+.
+    iOS: "18.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    # Strict concurrency is the point of adopting Swift 6 at all; the token
+    # store and API client are actors precisely so this passes.
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+
+targets:
+  NOVA:
+    type: application
+    platform: iOS
+    sources:
+      - path: NOVA
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nova.app
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        GENERATE_INFOPLIST_FILE: YES
+      configs:
+        Debug:
+          # The simulator talking to a server on the development machine.
+          # Cleartext to localhost only; see the ATS exception below.
+          INFOPLIST_KEY_NOVABaseURL: http://127.0.0.1:8000
+        Release:
+          INFOPLIST_KEY_NOVABaseURL: ""
+    info:
+      path: NOVA/Info.plist
+      properties:
+        NOVABaseURL: $(INFOPLIST_KEY_NOVABaseURL)
+        NSAppTransportSecurity:
+          # Debug-only convenience for reaching a local server. A release
+          # build must point at an HTTPS host; there is no blanket
+          # NSAllowsArbitraryLoads here, deliberately.
+          NSExceptionDomains:
+            localhost:
+              NSExceptionAllowsInsecureHTTPLoads: true
+            127.0.0.1:
+              NSExceptionAllowsInsecureHTTPLoads: true
+
+  NOVATests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: NOVATests
+    dependencies:
+      - target: NOVA
