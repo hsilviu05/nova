@@ -130,6 +130,49 @@ enumerated rather than wildcarded.
 The API image runs as a non-root user (uid 10001). The build toolchain lives
 in a separate builder stage and never reaches the runtime image.
 
+### Device credentials
+
+A device is bound to an account by the claim flow in
+[ADR 009](docs/decisions/009-device-claim-flow.md), which uses two secrets
+with deliberately different jobs.
+
+The **claim code** is shown on the device's face and typed by the owner. At
+roughly 29 bits it is weak by necessity, so it lives ten minutes, works once,
+and the claim endpoint is rate limited per user. There is no per-claim attempt
+counter: a wrong guess is looked up by digest and matches no row, so it could
+not be attributed to the code it was aiming at — rate limiting is the only
+mechanism that can see the attempt.
+
+The **provisioning token** is 256 bits and never displayed. Only the device
+that began provisioning can exchange it for a credential, and the exchange
+works exactly once. This is what keeps reading the code off someone's screen
+from escalating into impersonating their device.
+
+The resulting **device token** is 384 bits, prefixed `novad_` so secret
+scanners can match it, and stored only as a SHA-256 digest. It is checked on
+every WebSocket handshake, and the device's row is re-read at the same time,
+so releasing or re-provisioning a device invalidates it immediately rather
+than at some later expiry.
+
+`hardware_id` is an identifier, never a credential. It is printed on the chip
+and trivially spoofed, so it determines which row is provisioned and never who
+owns it.
+
+Physical possession is treated as authority to reset, as on consumer hardware:
+re-provisioning revokes existing credentials and clears the owner, so a resold
+or recovered NOVA stops reporting to whoever had it last.
+
+### The device protocol
+
+Authentication happens at the handshake, before the socket is accepted, so an
+unauthenticated peer never reaches a state where it can send frames. Every
+frame is validated against a discriminated union with `extra="forbid"`, and
+oversized payloads are rejected before the JSON decoder sees them. A peer that
+sends repeated malformed frames is disconnected with a distinct close code.
+
+Servo ranges are enforced at the boundary and rejected rather than clamped:
+silently changing what was asked hides the bug that produced it.
+
 ## Secrets
 
 Never committed: API keys, passwords, tokens, `.env` files, private

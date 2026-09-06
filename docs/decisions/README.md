@@ -14,6 +14,7 @@ built, but the reasoning disappears unless it is written down.
 | [006](006-refresh-token-rotation.md) | Rotating refresh tokens with reuse detection | Accepted |
 | [007](007-native-swiftui-client.md) | Native SwiftUI for the mobile client | Accepted |
 | [008](008-amoled-face-hardware.md) | An AMOLED face instead of a camera | Accepted |
+| [009](009-device-claim-flow.md) | Device claiming by on-screen code | Accepted |
 
 Format: Context, Decision, Alternatives considered, Consequences.
 

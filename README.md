@@ -95,7 +95,7 @@ Full detail, including the layering rules the backend follows, is in
 
 ## What is built today
 
-Phase 1 delivered a running, tested backend foundation:
+Phases 1 and 2 delivered a running, tested backend and device platform:
 
 - **FastAPI** application with versioned `/api/v1` routes and OpenAPI docs
 - **PostgreSQL 17 + pgvector**, async SQLAlchemy 2.0, Alembic migrations
@@ -105,7 +105,16 @@ Phase 1 delivered a running, tested backend foundation:
 - **Observability**: structured JSON logs, a request ID on every log line and
   response, per-request latency
 - **Health probes**: `/health` (liveness) and `/ready` (dependency readiness)
-- **96 tests**, 96% branch coverage, `ruff` and `mypy --strict` clean
+- **Device claim flow**: the device shows a code on its face, the owner types
+  it into the app, and the device then collects a credential only it can
+  collect
+- **Versioned WebSocket protocol**: authenticated at the handshake, every
+  frame validated against a discriminated union, heartbeat, telemetry
+  ingestion, and owner-issued commands
+- **214 tests**, 96% branch coverage, `ruff` and `mypy --strict` clean
+
+`scripts/simulate_device.py` drives the entire device lifecycle against a
+running API, so the flow is exercisable before the hardware arrives.
 
 Everything above is verified running, not scaffolded. What is *not* built yet
 is listed honestly in the [Roadmap](#roadmap).
@@ -158,6 +167,16 @@ Interactive documentation is at `/docs` (disabled in production).
 | `POST` | `/api/v1/auth/logout-all` | Revoke every session for the caller. |
 | `GET` | `/api/v1/users/me` | The authenticated user. |
 | `PATCH` | `/api/v1/users/me` | Update the authenticated user. |
+| `POST` | `/api/v1/devices/provision` | Device-facing. Start provisioning, return a claim code. |
+| `POST` | `/api/v1/devices/provision/poll` | Device-facing. Collect credentials once claimed. |
+| `POST` | `/api/v1/devices/claim` | Adopt the device showing a code. |
+| `GET` | `/api/v1/devices` | List your devices. |
+| `GET` | `/api/v1/devices/{id}` | Device detail, including live status. |
+| `PATCH` | `/api/v1/devices/{id}` | Rename a device. |
+| `DELETE` | `/api/v1/devices/{id}` | Remove a device and revoke its credentials. |
+| `GET` | `/api/v1/devices/{id}/telemetry` | Recent telemetry. |
+| `POST` | `/api/v1/devices/{id}/commands` | Send a command to a connected device. |
+| `WS` | `/api/v1/devices/ws` | The device connection. |
 
 Every non-2xx response uses one envelope, always carrying the request ID that
 appears in the server logs:
@@ -319,8 +338,8 @@ being unreachable.
 | Phase | Scope | Status |
 |---|---|---|
 | **1** | Backend foundation: API, Postgres, Redis, Docker, migrations, auth, logging | ✅ **Complete** |
-| 2 | Device platform: registration, device auth, WebSocket protocol, telemetry | Next |
-| 3 | iOS foundation: SwiftUI app, navigation, auth, home screen | Planned |
+| **2** | Device platform: claim flow, device auth, WebSocket protocol, telemetry | ✅ **Complete** |
+| 3 | iOS foundation: SwiftUI app, navigation, auth, home screen | Next |
 | 4 | AI chat: provider abstraction, conversations, streaming | Planned |
 | 5 | Semantic memory: extraction, embeddings, pgvector retrieval | Planned |
 | 6 | Physical robot: servos, animated AMOLED face, audio, proximity, IMU | Planned |
