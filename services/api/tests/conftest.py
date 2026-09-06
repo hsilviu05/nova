@@ -21,10 +21,11 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession, async_sessionmaker
 
-from nova.ai.base import ChatProvider
-from nova.ai.registry import build_chat_provider
+from nova.ai.base import ChatProvider, EmbeddingProvider
+from nova.ai.registry import build_chat_provider, build_embedding_provider
 from nova.core.config import (
     DatabaseSettings,
     JWTSettings,
@@ -62,6 +63,7 @@ def build_test_app(
     redis: Redis,
     connections: InMemoryConnectionRegistry | None = None,
     chat_provider: ChatProvider | None = None,
+    embedding_provider: EmbeddingProvider | None = None,
 ) -> FastAPI:
     """Build an app wired to test fixtures instead of its own lifespan.
 
@@ -81,6 +83,7 @@ def build_test_app(
     # Offline by default, so the suite exercises the whole conversation path
     # with no API key, no network, and no per-run cost.
     app.state.chat_provider = chat_provider or build_chat_provider(settings.ai)
+    app.state.embedding_provider = embedding_provider or build_embedding_provider(settings.ai)
     return app
 
 
@@ -118,6 +121,9 @@ async def engine(settings: Settings) -> AsyncIterator[AsyncEngine]:
     """Session-scoped engine with the schema created once."""
     engine = create_engine(settings.database)
     async with engine.begin() as conn:
+        # The migrations enable this; ``create_all`` does not, and the
+        # memories table cannot be built without the vector type.
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     try:

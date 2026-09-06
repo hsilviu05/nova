@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from nova import __version__
-from nova.ai.registry import build_chat_provider
+from nova.ai.registry import build_chat_provider, build_embedding_provider
 from nova.api.v1.health import router as health_router
 from nova.api.v1.router import router as v1_router
 from nova.core.config import Settings, get_settings
@@ -58,6 +58,9 @@ def _build_lifespan(
         # One provider for the process: it holds an HTTP client and
         # connection pool that should not be rebuilt per request.
         app.state.chat_provider = build_chat_provider(settings.ai)
+        # Built at startup so a width that disagrees with the memories column
+        # fails here rather than on the first message someone sends.
+        app.state.embedding_provider = build_embedding_provider(settings.ai)
 
         logger.info("api_started", version=__version__, environment=settings.environment)
         try:

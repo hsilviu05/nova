@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from nova.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from nova.models.conversation import Conversation
 from nova.models.device import Device
+from nova.models.memory import Memory
 from nova.models.refresh_token import RefreshToken
 
 
@@ -44,6 +45,11 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         passive_deletes=True,
     )
     conversations: Mapped[list[Conversation]] = relationship(
+        back_populates="owner",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    memories: Mapped[list[Memory]] = relationship(
         back_populates="owner",
         cascade="all, delete-orphan",
         passive_deletes=True,

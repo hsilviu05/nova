@@ -146,7 +146,22 @@ class AISettings(BaseModel):
     # nothing. A companion going silent reads as broken.
     enable_refusal_fallbacks: bool = True
 
+    # "lexical" measures shared vocabulary; "hash" is content-addressed and
+    # carries no similarity at all, kept only for storage-plumbing tests.
+    embedding_provider: Literal["lexical", "hash"] = "lexical"
+    # Must match the memories column; see nova.models.memory.
     embedding_dimensions: int = Field(default=1536, ge=64, le=4096)
+
+    # Memory retrieval and extraction.
+    memory_retrieval_limit: int = Field(default=6, ge=0, le=50)
+    # Cosine distance above which a memory is too unrelated to include.
+    # Recall matters more than precision here: a memory that turns out to be
+    # irrelevant costs a few tokens, one that is missed costs the illusion
+    # that NOVA remembers anything.
+    memory_max_distance: float = Field(default=0.85, ge=0.0, le=2.0)
+    # Extraction costs a model call per exchange, so it can be turned off.
+    memory_extraction_enabled: bool = True
+    memory_min_confidence: float = Field(default=0.4, ge=0.0, le=1.0)
 
     # AI calls cost real money, so they are limited more tightly than
     # ordinary reads.

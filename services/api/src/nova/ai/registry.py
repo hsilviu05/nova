@@ -10,9 +10,11 @@ from __future__ import annotations
 from nova.ai.anthropic_provider import AnthropicChatProvider
 from nova.ai.base import ChatProvider, EmbeddingProvider
 from nova.ai.errors import AIConfigurationError
+from nova.ai.lexical_embeddings import LexicalEmbeddingProvider
 from nova.ai.offline import OfflineChatProvider, OfflineEmbeddingProvider
 from nova.core.config import AISettings
 from nova.core.logging import get_logger
+from nova.models.memory import EMBEDDING_DIMENSIONS
 
 logger = get_logger(__name__)
 
@@ -60,7 +62,26 @@ def build_chat_provider(settings: AISettings) -> ChatProvider:
 def build_embedding_provider(settings: AISettings) -> EmbeddingProvider:
     """Construct the configured embedding provider.
 
-    Only the offline implementation exists in Phase 4. Phase 5 adds a real
-    one; the interface is already here so nothing has to change around it.
+    Anthropic has no embeddings endpoint, so a real embedder is a different
+    vendor entirely -- which is why ADR 002 gave embeddings their own
+    interface. Until one is configured, ``lexical`` measures shared
+    vocabulary, which genuinely retrieves without pretending to be semantic.
+
+    Raises:
+        AIConfigurationError: if the configured width disagrees with the
+            database column. Vectors of different widths cannot be compared,
+            so this has to fail loudly at startup rather than on first insert.
     """
-    return OfflineEmbeddingProvider(dimensions=settings.embedding_dimensions)
+    if settings.embedding_dimensions != EMBEDDING_DIMENSIONS:
+        raise AIConfigurationError(
+            f"Embedding width {settings.embedding_dimensions} does not match the "
+            f"memories column ({EMBEDDING_DIMENSIONS}). Changing it needs a "
+            "migration and a re-embedding pass.",
+            code="ai_embedding_dimension_mismatch",
+        )
+
+    match settings.embedding_provider:
+        case "hash":
+            return OfflineEmbeddingProvider(dimensions=EMBEDDING_DIMENSIONS)
+        case _:
+            return LexicalEmbeddingProvider(dimensions=EMBEDDING_DIMENSIONS)

@@ -141,18 +141,24 @@ class AnthropicChatProvider:
         return self._client.messages.stream
 
     def _build_params(self, request: ChatRequest) -> dict[str, Any]:
+        # The persona carries the cache breakpoint and is byte-stable across
+        # turns; anything volatile goes in a second block *after* it, so a
+        # different set of retrieved memories costs a cache miss on itself
+        # rather than on the whole prefix.
+        system: list[dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": request.system,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        if request.context:
+            system.append({"type": "text", "text": request.context})
+
         params: dict[str, Any] = {
             "model": self._model,
             "max_tokens": request.max_tokens,
-            # The system prompt is sent separately and kept byte-stable, so
-            # it stays a cacheable prefix across turns.
-            "system": [
-                {
-                    "type": "text",
-                    "text": request.system,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
+            "system": system,
             "messages": [self._as_param(m) for m in request.messages],
             # Effort tunes thinking depth and total spend. Chat replies are
             # short and latency-sensitive, so the service asks for "low".

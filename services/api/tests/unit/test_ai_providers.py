@@ -13,6 +13,7 @@ from nova.ai.errors import AIConfigurationError
 from nova.ai.offline import OfflineChatProvider, OfflineEmbeddingProvider
 from nova.ai.registry import build_chat_provider, build_embedding_provider
 from nova.core.config import AISettings
+from nova.models.memory import EMBEDDING_DIMENSIONS
 from nova.services.persona import Persona, build_system_prompt
 
 
@@ -137,9 +138,26 @@ class TestRegistry:
         with pytest.raises(AIConfigurationError):
             build_chat_provider(settings)
 
-    def test_builds_an_embedding_provider(self) -> None:
-        provider = build_embedding_provider(AISettings(embedding_dimensions=512))
-        assert provider.dimensions == 512
+    def test_builds_a_lexical_embedder_by_default(self) -> None:
+        provider = build_embedding_provider(AISettings())
+        assert provider.name == "lexical"
+        assert provider.dimensions == EMBEDDING_DIMENSIONS
+
+    def test_builds_the_hash_embedder_when_asked(self) -> None:
+        provider = build_embedding_provider(AISettings(embedding_provider="hash"))
+        assert provider.name == "offline"
+
+    def test_rejects_a_width_the_column_cannot_hold(self) -> None:
+        """A mismatch has to fail at startup, not on the first insert.
+
+        Vectors of different widths cannot be compared at all, so a silent
+        acceptance here would mean every future search returning nothing --
+        or an error from Postgres per request, which is worse.
+        """
+        with pytest.raises(AIConfigurationError) as caught:
+            build_embedding_provider(AISettings(embedding_dimensions=512))
+
+        assert caught.value.code == "ai_embedding_dimension_mismatch"
 
 
 class TestPersona:

@@ -14,8 +14,9 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 
 from nova.ai.errors import AIProviderError
 from nova.api.deps import (
@@ -23,6 +24,7 @@ from nova.api.deps import (
     get_app_settings,
     get_chat_streamer,
     get_conversation_service,
+    get_memory_recorder,
     get_rate_limiter,
     rate_limit_key,
 )
@@ -36,6 +38,7 @@ from nova.schemas.conversation import (
     SendMessageRequest,
 )
 from nova.services.conversation import ChatStreamer, ConversationService
+from nova.services.memory import MemoryRecorder
 from nova.services.rate_limit import RateLimiter
 
 logger = get_logger(__name__)
@@ -44,6 +47,7 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 ServiceDep = Annotated[ConversationService, Depends(get_conversation_service)]
 StreamerDep = Annotated[ChatStreamer, Depends(get_chat_streamer)]
+RecorderDep = Annotated[MemoryRecorder, Depends(get_memory_recorder)]
 RateLimiterDep = Annotated[RateLimiter, Depends(get_rate_limiter)]
 SettingsDep = Annotated[Settings, Depends(get_app_settings)]
 
@@ -121,8 +125,10 @@ async def send_message(
     conversation_id: uuid.UUID,
     payload: SendMessageRequest,
     request: Request,
+    background: BackgroundTasks,
     current_user: CurrentUser,
     service: ServiceDep,
+    recorder: RecorderDep,
     limiter: RateLimiterDep,
     settings: SettingsDep,
 ) -> MessageExchange:
@@ -132,7 +138,18 @@ async def send_message(
     response than parse an event stream.
     """
     await _enforce_limit(limiter, settings, request, current_user.id)
-    return await service.send_message(conversation_id, current_user.id, payload.content)
+    exchange = await service.send_message(conversation_id, current_user.id, payload.content)
+
+    # After the response, not before it: extraction is a second model call,
+    # and nobody should wait on NOVA deciding what to remember.
+    background.add_task(
+        recorder.record,
+        owner_id=current_user.id,
+        conversation_id=conversation_id,
+        user_text=payload.content,
+        assistant_text=exchange.assistant_message.content,
+    )
+    return exchange
 
 
 @router.post(
@@ -152,6 +169,7 @@ async def stream_message(
     request: Request,
     current_user: CurrentUser,
     streamer: StreamerDep,
+    recorder: RecorderDep,
     limiter: RateLimiterDep,
     settings: SettingsDep,
 ) -> StreamingResponse:
@@ -163,17 +181,20 @@ async def stream_message(
     """
     await _enforce_limit(limiter, settings, request, current_user.id)
 
-    user_message, history = await streamer.prepare(
-        conversation_id, current_user.id, payload.content
-    )
+    turn = await streamer.prepare(conversation_id, current_user.id, payload.content)
+
+    # Filled by the generator, read by the background task. Safe only because
+    # Starlette runs the background task strictly after the body is finished.
+    reply: list[str] = []
 
     async def events() -> AsyncIterator[str]:
         # Echo the stored user turn first so the client can replace its
         # optimistic copy with the real id.
-        yield _event("message", user_message.model_dump(mode="json"))
+        yield _event("message", turn.user_message.model_dump(mode="json"))
 
         try:
-            async for chunk in streamer.stream(conversation_id, history):
+            async for chunk in streamer.stream(conversation_id, turn.history, turn.context):
+                reply.append(chunk)
                 yield _event("delta", {"text": chunk})
         except AIProviderError as exc:
             # Only reachable before any text was produced; the streamer
@@ -184,6 +205,21 @@ async def stream_message(
 
         yield _event("done", {"conversation_id": str(conversation_id)})
 
+    async def remember() -> None:
+        """Extract memories once the stream has been delivered.
+
+        A client that disconnects mid-reply may never reach this -- Starlette
+        drops the background task with the response. That is the right
+        trade: the partial reply is still persisted by the streamer, and
+        extracting from a half-sent answer is worse than not extracting.
+        """
+        await recorder.record(
+            owner_id=current_user.id,
+            conversation_id=conversation_id,
+            user_text=payload.content,
+            assistant_text="".join(reply),
+        )
+
     return StreamingResponse(
         events(),
         media_type="text/event-stream",
@@ -192,6 +228,7 @@ async def stream_message(
             # Stops nginx buffering the stream into one lump on delivery.
             "X-Accel-Buffering": "no",
         },
+        background=BackgroundTask(remember),
     )
 
 

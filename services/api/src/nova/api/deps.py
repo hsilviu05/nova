@@ -17,7 +17,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from nova.ai.base import ChatProvider
+from nova.ai.base import ChatProvider, EmbeddingProvider
 from nova.core.config import Settings
 from nova.core.errors import AuthenticationError
 from nova.core.security import PasswordHasher, TokenService
@@ -30,6 +30,7 @@ from nova.repositories.device import (
     DeviceRepository,
     DeviceTelemetryRepository,
 )
+from nova.repositories.memory import MemoryRepository
 from nova.repositories.refresh_token import RefreshTokenRepository
 from nova.repositories.user import UserRepository
 from nova.services.auth import AuthService
@@ -37,6 +38,7 @@ from nova.services.connections import ConnectionRegistry
 from nova.services.conversation import ChatStreamer, ConversationService
 from nova.services.device import DeviceService
 from nova.services.health import HealthService
+from nova.services.memory import MemoryExtractor, MemoryRecorder, MemoryService
 from nova.services.provisioning import ProvisioningService
 from nova.services.rate_limit import RateLimiter
 
@@ -164,11 +166,53 @@ def get_device_service(
     )
 
 
-# -- conversations ------------------------------------------------------------
+# -- AI providers -------------------------------------------------------------
 
 
 def get_chat_provider(request: Request) -> ChatProvider:
     return request.app.state.chat_provider  # type: ignore[no-any-return]
+
+
+def get_embedding_provider(request: Request) -> EmbeddingProvider:
+    return request.app.state.embedding_provider  # type: ignore[no-any-return]
+
+
+# -- memory -------------------------------------------------------------------
+
+
+def get_memory_repository(session: SessionDep) -> MemoryRepository:
+    return MemoryRepository(session)
+
+
+def get_memory_service(
+    request: Request,
+    memories: Annotated[MemoryRepository, Depends(get_memory_repository)],
+    embeddings: Annotated[EmbeddingProvider, Depends(get_embedding_provider)],
+) -> MemoryService:
+    settings: Settings = request.app.state.settings
+    return MemoryService(memories=memories, embeddings=embeddings, settings=settings.ai)
+
+
+def get_memory_recorder(
+    request: Request,
+    provider: Annotated[ChatProvider, Depends(get_chat_provider)],
+    embeddings: Annotated[EmbeddingProvider, Depends(get_embedding_provider)],
+) -> MemoryRecorder:
+    """Build the recorder with the session factory, not a session.
+
+    Same reason as :func:`get_chat_streamer`: it runs as a background task
+    after the response has been sent, when the request session is closed.
+    """
+    settings: Settings = request.app.state.settings
+    return MemoryRecorder(
+        session_factory=request.app.state.session_factory,
+        extractor=MemoryExtractor(provider=provider, settings=settings.ai),
+        embeddings=embeddings,
+        settings=settings.ai,
+    )
+
+
+# -- conversations ------------------------------------------------------------
 
 
 def get_conversation_repository(session: SessionDep) -> ConversationRepository:
@@ -184,6 +228,7 @@ def get_conversation_service(
     conversations: Annotated[ConversationRepository, Depends(get_conversation_repository)],
     messages: Annotated[MessageRepository, Depends(get_message_repository)],
     provider: Annotated[ChatProvider, Depends(get_chat_provider)],
+    memories: Annotated[MemoryService, Depends(get_memory_service)],
 ) -> ConversationService:
     settings: Settings = request.app.state.settings
     return ConversationService(
@@ -191,12 +236,14 @@ def get_conversation_service(
         messages=messages,
         provider=provider,
         settings=settings.ai,
+        memories=memories,
     )
 
 
 def get_chat_streamer(
     request: Request,
     provider: Annotated[ChatProvider, Depends(get_chat_provider)],
+    embeddings: Annotated[EmbeddingProvider, Depends(get_embedding_provider)],
 ) -> ChatStreamer:
     """Build the streamer with the session *factory*, not a session.
 
@@ -208,6 +255,7 @@ def get_chat_streamer(
         session_factory=request.app.state.session_factory,
         provider=provider,
         settings=settings.ai,
+        embeddings=embeddings,
     )
 
 

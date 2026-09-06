@@ -32,10 +32,16 @@ class ChatRequest:
     ``system`` is separate from ``messages`` because every provider worth
     supporting treats it separately, and because keeping it stable is what
     makes prompt caching possible.
+
+    ``context`` is the volatile half of the system prompt -- retrieved
+    memories, and later the device's state. It is a separate field precisely
+    so it cannot be concatenated into ``system``: a prefix that changes every
+    turn is a prefix that never caches.
     """
 
     system: str
     messages: list[ChatMessage]
+    context: str | None = None
     max_tokens: int = 1024
     # Chat replies from a desk companion are short and want low latency, so
     # the default leans cheap rather than thorough.

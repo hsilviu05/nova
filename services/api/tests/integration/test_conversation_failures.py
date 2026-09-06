@@ -311,11 +311,11 @@ class TestClientDisconnect:
             provider=OfflineChatProvider(chunk_size=4),
             settings=settings.ai,
         )
-        _, history = await streamer.prepare(conversation_id, owner_id, "Cut me off")
+        turn = await streamer.prepare(conversation_id, owner_id, "Cut me off")
 
         # Read one chunk, then abandon the generator the way a dropped
         # connection does.
-        stream = streamer.stream(conversation_id, history)
+        stream = streamer.stream(conversation_id, turn.history)
         first = await anext(stream)
         await stream.aclose()
 
