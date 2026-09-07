@@ -1,0 +1,10 @@
+## Managed dependencies, resolved by the ESP Component Registry.
+##
+## Only one, and it is not optional: the WebSocket client. Writing a
+## WebSocket client by hand -- framing, masking, ping/pong, close handshake,
+## TLS -- would be the largest and least-reviewed piece of code in the
+## firmware, sitting directly on the network.
+
+dependencies:
+  idf: ">=5.2"
+  espressif/esp_websocket_client: "~1.2"

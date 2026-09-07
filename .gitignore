@@ -75,3 +75,7 @@ hardware/case/*.check.stl
 
 # Host test builds for the firmware core.
 firmware/build/
+
+# ESP-IDF managed dependencies, fetched by idf.py.
+firmware/managed_components/
+firmware/dependencies.lock

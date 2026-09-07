@@ -1,0 +1,25 @@
+menu "NOVA"
+
+config NOVA_BACKEND_URL
+    string "Backend base URL"
+    default "wss://localhost:8000"
+    help
+        Base URL of the NOVA backend, without a path. The device appends
+        /api/v1/devices/ws.
+
+        Compiled in rather than provisioned at runtime: pointing a device at a
+        different backend should be a firmware change. A runtime-settable
+        server URL is a way to redirect somebody's device to an attacker.
+
+        Use wss://, not ws://. The device token travels in the query string,
+        and over ws:// it travels in clear text to anything on the path.
+
+config NOVA_FIRMWARE_VERSION
+    string "Firmware version"
+    default "0.1.0"
+    help
+        Reported in every heartbeat. The dashboard uses it to tell which
+        devices are running which build, which is the difference between "one
+        user has a problem" and "the last release has a problem".
+
+endmenu

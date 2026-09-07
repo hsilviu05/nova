@@ -1,0 +1,34 @@
+# Defaults for the device build. `idf.py menuconfig` writes sdkconfig, which
+# is gitignored; this file is the part that is reviewed.
+
+CONFIG_IDF_TARGET="esp32s3"
+
+# 16 MB flash and 8 MB PSRAM, per the board.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+
+# The certificate bundle is what makes wss:// mean anything. Without it the
+# TLS handshake has nothing to verify against, and the device token, the
+# telemetry and every command are readable by anything on the network path.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+
+# C++20, matching the host test build. Two different language versions across
+# the same core/ sources would be a way to have code that passes tests on a
+# laptop and misbehaves on the device.
+CONFIG_COMPILER_CXX_EXCEPTIONS=n
+CONFIG_COMPILER_CXX_RTTI=n
+
+# Exceptions are off, so the protocol decoder must not throw -- it does not;
+# see core/protocol.cpp, where a bad frame becomes an Invalid value rather
+# than an exception. That is not merely a style choice on this target.
+
+# A watchdog that actually fires. A wedged I2C transaction or a stuck socket
+# send should restart the device, not leave a desk ornament that looks awake.
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+
+# Logs at info. Debug level on this project prints frame contents, and frames
+# carry the device token during the handshake.
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y

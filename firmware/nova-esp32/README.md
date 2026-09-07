@@ -8,7 +8,20 @@ Board choice and its constraints:
 
 ## Module layout
 
-Planned, and deliberately not one `main.cpp`:
+**This was the Phase 2 plan. The firmware was built differently and lives in
+[`../`](../README.md)** — see that README for what actually exists. The
+layout below is kept because the peripheral list and the hardware notes under
+it are still accurate; the directory structure is not.
+
+What changed, and why: the plan split by peripheral. The build splits by
+*testability* instead. Everything that decides went into `core/` — pure C++,
+no ESP-IDF, host-tested — and everything that touches hardware into `main/`,
+which cannot be compiled without the Xtensa toolchain. Splitting by
+peripheral would have put the behaviour state machine and the servo driver on
+the same side of that line, and the state machine is the part worth testing.
+
+Remaining unbuilt, from the list below: `display/`, `face/`, `touch/`,
+`audio/`.
 
 ```
 src/

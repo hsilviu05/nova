@@ -32,18 +32,59 @@ judgement lives, and there is a test for it.
 | `core/geometry.hpp` — servo mapping, travel limits | **Done, tested** |
 | `core/behaviour.*` — state machine, presence, intents | **Done, tested** |
 | `core/protocol.*` — the versioned frames | **Done, tested both ways** |
-| ESP-IDF layer — WiFi, WebSocket, NVS | Next |
-| Drivers — PCA9685, VL53L0X | Not started |
+| `core/pca9685.*` — servo driver command encoding | **Done, tested** |
+| `core/rangefinder.hpp` — reading validity, median filter | **Done, tested** |
+| `core/outbox.hpp` — offline telemetry queue | **Done, tested** |
+| `core/connection.*` — reconnect policy | **Done, tested** |
+| `main/` — I²C, servos, rangefinder, NVS, WiFi, WebSocket | Written, **never compiled** |
 | Face rendering | Not started |
+| Provisioning UI (needs the panel) | Not started |
 
 **Nothing here has run on hardware.** There is no board yet. What *is* true
-is that the core compiles under `-Wall -Wextra -Wpedantic -Werror` and its
-tests pass, and that the protocol is checked against the server's own schema
-in both directions.
+is that everything in `core/` compiles under `-Wall -Wextra -Wpedantic
+-Werror`, its tests pass, and the protocol is checked against the server's
+own schema in both directions.
 
-The ESP-IDF layer, when it exists, **cannot be compiled in this repository's
-CI**: it needs the Xtensa toolchain, which is not installed here. That is
-precisely why as much logic as possible lives in `core/`.
+`main/` is a different claim, and a weaker one. It **cannot be compiled in
+this repository's CI**: it needs ESP-IDF and the Xtensa toolchain, neither of
+which is installed here. It has been written and reviewed, and it has never
+been through a compiler. Expect to fix build errors on first bring-up. That
+gap is the whole reason the split exists and the reason `main/` is as thin as
+it is — every part of the system with a decision in it was pushed across the
+line into `core/`, where a test can reach it.
+
+### What `main/` contains
+
+| File | Job |
+|---|---|
+| `app_main.cpp` | Wiring only: sensors → `Observation` → engine → `Action` |
+| `i2c_bus.*` | The one shared bus, with the mutex that makes two tasks safe |
+| `servos.*` | Replays `core/pca9685` sequences; releases the head when idle |
+| `distance.*` | VL53L0X single-shot reads, fed into `core/rangefinder` |
+| `nvs_store.*` | WiFi credentials and the device token. Logged nowhere |
+| `wifi.*` | Station mode; distinguishes a refused password from no network |
+| `ws_link.*` | The WebSocket, and reading close code 4001 |
+
+### Known gaps
+
+- **The rangefinder runs uncalibrated.** `distance.cpp` uses the sensor's
+  power-on defaults: no tuning register set, no SPAD calibration. Absolute
+  accuracy is nearer ±10% than ±3%. NOVA needs "is somebody within ~70 cm"
+  with 30 cm of hysteresis and an 800 ms debounce, and 10% does not reach
+  those thresholds. Adding ST's driver later changes nothing above it.
+- **Timestamps are uptime, not wall time.** Until an RTC sync lands,
+  `recorded_at` is time since boot, marked as such rather than fabricated —
+  a plausible-looking wrong timestamp would corrupt every habit the analytics
+  phase infers.
+- **There is no provisioning UI.** A device with no stored credentials logs
+  what is missing and stops, because showing a claim code needs the panel
+  driver. It names the state it is stuck in rather than pretending.
+- **NVS is not encrypted** unless flash encryption is enabled in hardware,
+  which is a production step, not something the firmware can do to itself. An
+  attacker with physical access and a flash reader can read the device token;
+  the mitigation is that it is revocable from the dashboard.
+- **Face rendering does not exist.** State changes are logged so a bring-up
+  session can watch the engine work without a screen.
 
 ## Running the tests
 
@@ -130,15 +171,26 @@ Nothing else. No test framework, no numerics library.
 
 ## Building for the device
 
-Once the ESP-IDF layer exists:
-
 ```bash
 . $IDF_PATH/export.sh
 idf.py set-target esp32s3
+idf.py menuconfig      # NOVA → Backend base URL
 idf.py build flash monitor
 ```
 
-You need ESP-IDF v5.x. The board is ESP32-S3 with 16 MB flash and 8 MB PSRAM.
+**ESP-IDF v5.2 or later.** The floor is the `i2c_master` driver, which
+replaced the legacy `driver/i2c.h` API in that release. The board is an
+ESP32-S3 with 16 MB flash and 8 MB PSRAM.
+
+`core/` is compiled into the app as a component that references the sources
+in place — the same translation units the host tests exercise are the ones
+that run on the device. A device-side copy would let the two drift, and the
+drift would be invisible until it was a robot behaving oddly on a desk.
+
+Set the backend URL before flashing. It is compiled in rather than
+provisioned at runtime, deliberately: a runtime-settable server URL is a way
+to redirect somebody's device to an attacker. Use `wss://` — the device token
+travels in the query string, and over `ws://` it travels in clear text.
 
 ## Pins
 
