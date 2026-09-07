@@ -9,6 +9,10 @@ dependencies = [
     # Web framework and ASGI server.
     "fastapi>=0.115,<0.117",
     "uvicorn[standard]>=0.34,<0.36",
+    # Starlette arrives with FastAPI, but NOVA imports it directly --
+    # middleware bases, BackgroundTask, WebSocketState. A package the code
+    # imports is a dependency of the code, regardless of what pulls it in.
+    "starlette>=0.40,<1",
     # Validation and configuration. pydantic-settings gives typed, validated
     # env parsing; os.environ alone gives neither.
     "pydantic>=2.9,<3",
@@ -19,8 +23,16 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.36,<2.1",
     "asyncpg>=0.30,<0.31",
     "alembic>=1.14,<2",
+    # pgvector supplies the SQLAlchemy Vector column type the memories table
+    # is built on. A runtime dependency, not a dev one: nova.models.memory
+    # imports it, so the app does not start without it.
+    "pgvector>=0.3,<0.6",
     # Redis for rate limiting and ephemeral state. redis-py ships asyncio.
     "redis>=5.2,<7",
+    # The Anthropic SDK, imported by the single adapter that talks to it.
+    # Runtime even though the default provider is offline: the module is
+    # imported when the provider registry is built, not when a key is set.
+    "anthropic>=1.0,<2",
     # Security. argon2id is the OWASP first-choice password KDF; PyJWT signs
     # and verifies the access tokens.
     "argon2-cffi>=23.1,<26",
@@ -39,6 +51,11 @@ dev = [
     # in its own event loop and connection -- which would neither share the
     # test transaction nor stay on the loop the session engine is bound to.
     "httpx-ws>=0.9,<0.10",
+    # The Anthropic SDK builds its errors from httpx2 objects, and the
+    # provider tests construct those directly to exercise the failure paths.
+    # Declared rather than leaned on transitively: if the SDK changes HTTP
+    # client, this should fail loudly here, not mysteriously in a test.
+    "httpx2>=2,<3",
     # Used by scripts/simulate_device.py to stand in for the hardware.
     "websockets>=13,<16",
     "ruff>=0.8,<0.15",

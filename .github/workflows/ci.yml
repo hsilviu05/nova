@@ -36,6 +36,12 @@ jobs:
       - name: Install
         run: pip install -e ".[dev]"
 
+      - name: Dependencies are declared
+        # An import the project does not declare works only where that
+        # package happens to be installed. Checked against pyproject, not
+        # against what this runner has.
+        run: python scripts/check_declared_dependencies.py
+
       - name: Lint
         run: ruff check --output-format=github .
 

@@ -4,6 +4,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../services/api"
 
+echo "── declared dependencies ────────────────────────"
+# First, because an undeclared dependency is invisible to every check that
+# runs inside a virtualenv that already has it -- and breaks every
+# environment that installs from the project's own metadata.
+python scripts/check_declared_dependencies.py
+
 echo "── lint ─────────────────────────────────────────"
 ruff check .
 
