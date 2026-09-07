@@ -84,8 +84,35 @@ struct CommandResult {
 /// Encode an outbound frame. ``id`` is the frame's own identifier.
 std::string encode_heartbeat(const Heartbeat &heartbeat, const FrameId &id);
 std::string encode_event(const TelemetryEvent &event, const FrameId &id);
-std::string encode_batch(const std::vector<TelemetryEvent> &events, const FrameId &id);
 std::string encode_result(const CommandResult &result, const FrameId &id);
+
+/// A batch frame and how much of the input it actually carries.
+///
+/// The count is not a convenience. The server enforces two independent
+/// limits -- at most 100 events *and* at most 16 KiB -- and which one binds
+/// depends on how much each event carries. A hundred sparse presence events
+/// come to about 12 KiB and all fit; a hundred with every optional field set
+/// come to about 24 KiB and only 66 do. A caller that assumed all its events
+/// went into the frame would release them from its outbox and lose the rest.
+struct BatchFrame {
+    std::string json;
+    /// Events from the front of the input that the frame contains.
+    size_t included = 0;
+
+    bool empty() const { return included == 0; }
+};
+
+/// Encode as many events as fit within ``max_bytes``.
+///
+/// Fills from the front and stops at the budget, so the caller releases
+/// exactly ``included`` events and the rest stay queued for the next flush.
+///
+/// ``included == 0`` with a non-empty input means the very first event does
+/// not fit alone. That event can never be sent, and a caller that keeps
+/// retrying it will never send anything again -- so the correct response is
+/// to drop it and say so, not to try harder.
+BatchFrame encode_batch(const std::vector<TelemetryEvent> &events, const FrameId &id,
+                        size_t max_bytes = kMaxFrameBytes);
 
 // ---------------------------------------------------------------------------
 // Inbound: server -> device

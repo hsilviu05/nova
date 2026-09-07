@@ -84,8 +84,8 @@ int main() {
     pose.uptime_seconds = 0;
     emit("event_extremes", encode_event(pose, id));
 
-    emit("batch_one", encode_batch({presence()}, id));
-    emit("batch_many", encode_batch({presence(), bare, pose}, id));
+    emit("batch_one", encode_batch({presence()}, id).json);
+    emit("batch_many", encode_batch({presence(), bare, pose}, id).json);
 
     CommandResult ok;
     ok.command_id = "00000002-0000-4000-8000-000000000000";

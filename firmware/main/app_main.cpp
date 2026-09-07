@@ -297,10 +297,24 @@ void run(Peripherals &peripherals, nova::hw::Link &link) {
 
         // Flush whatever the outbox holds. Peek then release, so a send that
         // fails leaves the batch queued rather than losing it.
+        //
+        // Only what the frame actually carried is released. The server caps a
+        // batch at 100 events *and* at 16 KiB, and which binds depends on how
+        // full each event is: sparse ones all fit, but the device.state
+        // events queued below carry six fields, and a hundred of those
+        // overshoot. Releasing the whole peek would discard the remainder.
         if (link.connected() && !outbox.empty()) {
             const auto batch = outbox.peek();
-            if (link.send(nova::encode_batch(batch, frame_id())) == ESP_OK) {
-                outbox.release(batch.size());
+            const nova::BatchFrame frame = nova::encode_batch(batch, frame_id());
+
+            if (frame.empty()) {
+                // One event too large to send on its own. Dropped, loudly: a
+                // device that keeps retrying it never sends anything again,
+                // which costs all telemetry rather than one event.
+                ESP_LOGE(kTag, "dropping an event that cannot fit in a frame");
+                outbox.release(1);
+            } else if (link.send(frame.json) == ESP_OK) {
+                outbox.release(frame.included);
             }
         }
 

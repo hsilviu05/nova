@@ -286,16 +286,64 @@ std::string encode_event(const TelemetryEvent &event, const FrameId &id) {
     return render(frame.get());
 }
 
-std::string encode_batch(const std::vector<TelemetryEvent> &events, const FrameId &id) {
+namespace {
+
+/// Render a batch frame carrying the first `count` events.
+std::string render_batch(const std::vector<TelemetryEvent> &events, const FrameId &id,
+                         size_t count) {
     Json frame = own(new_frame("telemetry.batch", id));
-
     cJSON *array = cJSON_CreateArray();
-    for (const TelemetryEvent &event : events) {
-        cJSON_AddItemToArray(array, event_payload(event));
+    for (size_t index = 0; index < count; ++index) {
+        cJSON_AddItemToArray(array, event_payload(events[index]));
     }
-
     cJSON_AddItemToObject(frame.get(), "payload", array);
     return render(frame.get());
+}
+
+}  // namespace
+
+BatchFrame encode_batch(const std::vector<TelemetryEvent> &events, const FrameId &id,
+                        size_t max_bytes) {
+    BatchFrame result;
+    if (events.empty()) {
+        return result;
+    }
+
+    // Cost the envelope once: the frame with an empty array. Everything after
+    // it is the payload's own weight plus one comma per extra element.
+    size_t budget = render_batch(events, id, 0).size();
+
+    // Measure each event alone rather than re-rendering the whole frame after
+    // every addition -- same answer, and it does not turn a hundred-event
+    // flush into a hundred renders of a growing document.
+    size_t fits = 0;
+    for (const TelemetryEvent &event : events) {
+        Json payload = own(event_payload(event));
+        const size_t cost = render(payload.get()).size() + (fits == 0 ? 0 : 1);
+        if (budget + cost > max_bytes) {
+            break;
+        }
+        budget += cost;
+        ++fits;
+    }
+
+    if (fits == 0) {
+        // The first event does not fit by itself. Reported as included == 0
+        // rather than squeezed in: the caller has to drop it, and an
+        // oversized frame here would be refused by the server and leave the
+        // outbox retrying the same event forever.
+        return result;
+    }
+
+    // The measurement above is exact, not an estimate, which is why there is
+    // no trimming pass after this. `render_batch(..., 0)` already includes
+    // the empty `[]`, each event is measured with the same renderer that
+    // emits it, and the separators are counted one per gap -- so the sum is
+    // the rendered length, with no slack to guard against. A trimming loop
+    // here would be a branch no input can reach and no test can cover.
+    result.json = render_batch(events, id, fits);
+    result.included = fits;
+    return result;
 }
 
 std::string encode_result(const CommandResult &result, const FrameId &id) {

@@ -323,12 +323,124 @@ int main() {
         event.event_type = "person_detected";
         event.recorded_at = "2026-09-07T08:15:00Z";
 
-        const std::string json = encode_batch({event, event, event}, "b1");
+        const std::string json = encode_batch({event, event, event}, "b1").json;
         cJSON *root = cJSON_Parse(json.c_str());
         const cJSON *payload = cJSON_GetObjectItemCaseSensitive(root, "payload");
         CHECK(cJSON_IsArray(payload));
         CHECK_INT(cJSON_GetArraySize(payload), 3);
         cJSON_Delete(root);
+    }
+
+    CASE("a batch reports how many events it actually carried") {
+        // The server caps a batch two ways -- at most 100 events AND at most
+        // 16 KiB -- and the two are independent. A sparse event leaves all
+        // 100 inside the byte cap; a fully populated one does not. The count
+        // is what tells the caller which happened.
+        TelemetryEvent sparse;
+        sparse.event_type = "person_detected";
+        sparse.recorded_at = "2026-09-07T08:15:00Z";
+        sparse.distance_cm = 62;
+
+        const BatchFrame lean = encode_batch(std::vector<TelemetryEvent>(100, sparse), "b2");
+        CHECK_INT(lean.included, 100);
+        CHECK(lean.json.size() <= kMaxFrameBytes);
+
+        cJSON *root = cJSON_Parse(lean.json.c_str());
+        const cJSON *payload = cJSON_GetObjectItemCaseSensitive(root, "payload");
+        // The array length must match the reported count, or the caller
+        // releases the wrong number of events from its outbox.
+        CHECK_INT(cJSON_GetArraySize(payload), static_cast<int>(lean.included));
+        cJSON_Delete(root);
+    }
+
+    CASE("100 fully populated events do not fit, and the count says so") {
+        // This is the case the old encoder got wrong. Every optional field
+        // set puts 100 events at roughly 24 KiB, well past the server's cap:
+        // the frame was refused, the send failed, nothing was released, and
+        // the next flush built the identical oversized frame. Telemetry
+        // stopped permanently and nothing reported why.
+        TelemetryEvent full;
+        full.event_type = "presence.dwell_ended";
+        full.recorded_at = "2026-09-07T08:15:00.123456+00:00";
+        full.battery_percent = 100;
+        full.temperature_c = 34.25;
+        full.distance_cm = 400;
+        full.head_yaw = -90;
+        full.head_pitch = -45;
+        full.wifi_rssi = -120;
+        full.uptime_seconds = 4294967295u;
+        full.state = "SPEAKING";
+
+        const std::vector<TelemetryEvent> many(100, full);
+        const BatchFrame batch = encode_batch(many, "b7");
+
+        CHECK(batch.included > 0);
+        CHECK(batch.included < many.size());
+        CHECK(batch.json.size() <= kMaxFrameBytes);
+
+        cJSON *root = cJSON_Parse(batch.json.c_str());
+        CHECK_INT(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(root, "payload")),
+                  static_cast<int>(batch.included));
+        cJSON_Delete(root);
+    }
+
+    CASE("a batch never exceeds the byte budget") {
+        TelemetryEvent event;
+        event.event_type = "person_detected";
+        event.recorded_at = "2026-09-07T08:15:00Z";
+        event.distance_cm = 62;
+
+        const std::vector<TelemetryEvent> many(100, event);
+        for (size_t budget : {size_t{200}, size_t{500}, size_t{2000}, kMaxFrameBytes}) {
+            const BatchFrame batch = encode_batch(many, "b3", budget);
+            if (batch.empty()) {
+                continue;
+            }
+            CHECK(batch.json.size() <= budget);
+            CHECK(batch.included >= 1);
+        }
+    }
+
+    CASE("an event too large to send alone is reported, not squeezed in") {
+        // included == 0 tells the caller to drop it. Without that signal a
+        // device retries the same undeliverable event forever and never sends
+        // anything again -- all telemetry lost rather than one event.
+        TelemetryEvent event;
+        event.event_type = "person_detected";
+        event.recorded_at = "2026-09-07T08:15:00Z";
+
+        const BatchFrame batch = encode_batch({event}, "b4", 10);
+        CHECK(batch.empty());
+        CHECK_INT(batch.included, 0);
+        CHECK(batch.json.empty());
+    }
+
+    CASE("an empty batch encodes to nothing, not an empty frame") {
+        // The server's schema requires at least one event, so a frame with an
+        // empty array would be rejected as malformed.
+        const BatchFrame batch = encode_batch({}, "b5");
+        CHECK(batch.empty());
+        CHECK(batch.json.empty());
+    }
+
+    CASE("a batch fills the budget rather than sending one event at a time") {
+        // Not merely "some": an encoder that returned a single event per
+        // frame would satisfy every check above while turning one flush into
+        // a hundred round trips.
+        TelemetryEvent small;
+        small.event_type = "x";
+        small.recorded_at = "2026-09-07T08:15:00Z";
+
+        const std::vector<TelemetryEvent> many(100, small);
+        const BatchFrame batch = encode_batch(many, "b6");
+
+        CHECK(batch.included > 1);
+        // Either everything fitted, or one more event would have overshot.
+        if (batch.included < many.size()) {
+            const BatchFrame one_more =
+                encode_batch(many, "b6", kMaxFrameBytes * 2);
+            CHECK(one_more.included > batch.included);
+        }
     }
 
     CASE("a command result reports success as a boolean") {
@@ -358,7 +470,7 @@ int main() {
         for (const std::string &json : {
                  encode_heartbeat(beat, "1"),
                  encode_event(event, "2"),
-                 encode_batch({event}, "3"),
+                 encode_batch({event}, "3").json,
                  encode_result(result, "4"),
              }) {
             cJSON *root = cJSON_Parse(json.c_str());
