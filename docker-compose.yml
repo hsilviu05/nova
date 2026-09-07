@@ -71,6 +71,19 @@ services:
       NOVA_JWT__SECRET_KEY: ${NOVA_JWT__SECRET_KEY:?set NOVA_JWT__SECRET_KEY in .env}
       NOVA_OBSERVABILITY__LOG_LEVEL: ${NOVA_OBSERVABILITY__LOG_LEVEL:-INFO}
       NOVA_OBSERVABILITY__LOG_JSON: ${NOVA_OBSERVABILITY__LOG_JSON:-true}
+      # AI. Forwarded explicitly: the container has no .env, so a value set
+      # there reaches the API only through this list.
+      NOVA_AI__CHAT_PROVIDER: ${NOVA_AI__CHAT_PROVIDER:-offline}
+      NOVA_AI__CHAT_MODEL: ${NOVA_AI__CHAT_MODEL:-claude-opus-5}
+      NOVA_AI__ANTHROPIC_API_KEY: ${NOVA_AI__ANTHROPIC_API_KEY:-}
+      # Ollama runs natively on the host, never in this stack -- a container
+      # cannot reach the GPU on macOS. host.docker.internal is Docker's name
+      # for the host; extra_hosts below makes it resolve on Linux too.
+      NOVA_AI__OLLAMA_BASE_URL: ${NOVA_AI__OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      NOVA_AI__OLLAMA_MODEL: ${NOVA_AI__OLLAMA_MODEL:-qwen2.5:7b}
+      NOVA_AI__OLLAMA_KEEP_ALIVE: ${NOVA_AI__OLLAMA_KEEP_ALIVE:-30m}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${NOVA_API_PORT:-8000}:8000"
     # Migrations run on start, in the same image as the app, so the schema can
