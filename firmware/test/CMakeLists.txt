@@ -31,6 +31,7 @@ target_compile_options(cjson PRIVATE -w)
 
 add_library(nova_core
     ../core/src/behaviour.cpp
+    ../core/src/pca9685.cpp
     ../core/src/protocol.cpp
 )
 target_include_directories(nova_core PUBLIC ../core/include)
@@ -38,7 +39,7 @@ target_link_libraries(nova_core PUBLIC cjson)
 
 enable_testing()
 
-set(SUITES geometry behaviour protocol)
+set(SUITES geometry behaviour protocol pca9685 outbox)
 
 foreach(suite IN LISTS SUITES)
     add_executable(test_${suite} test_${suite}.cpp)
