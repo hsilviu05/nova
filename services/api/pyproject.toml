@@ -7,12 +7,20 @@ license = { text = "MIT" }
 
 dependencies = [
     # Web framework and ASGI server.
-    "fastapi>=0.115,<0.117",
+    # FastAPI 0.116 capped starlette below 0.49, which made every patched
+    # starlette unreachable -- see the floor below. 0.141 drops the cap.
+    "fastapi>=0.141,<0.150",
     "uvicorn[standard]>=0.34,<0.36",
     # Starlette arrives with FastAPI, but NOVA imports it directly --
     # middleware bases, BackgroundTask, WebSocketState. A package the code
     # imports is a dependency of the code, regardless of what pulls it in.
-    "starlette>=0.40,<1",
+    #
+    # The floor is a security floor, not a preference: 0.48 carries six
+    # known advisories (PYSEC-2026-161, -248, -249, -1942, -2280, -2281) and
+    # the highest fix among them is 1.3.1. If a future FastAPI re-caps
+    # starlette below this, resolution fails loudly rather than quietly
+    # installing a vulnerable version.
+    "starlette>=1.3.1,<2",
     # Validation and configuration. pydantic-settings gives typed, validated
     # env parsing; os.environ alone gives neither.
     "pydantic>=2.9,<3",
@@ -43,8 +51,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.3,<9",
-    "pytest-asyncio>=0.24,<1.3",
+    # 9.0.3 is the fix for PYSEC-2026-1845.
+    "pytest>=9.0.3,<10",
+    "pytest-asyncio>=1.0,<2",
     "pytest-cov>=6.0,<8",
     "httpx>=0.28,<0.29",
     # httpx has no WebSocket transport, and Starlette TestClient runs the app
@@ -91,12 +100,15 @@ select = [
     "RUF",
 ]
 ignore = [
-    "S101",  # assert — pytest relies on it
     "B008",  # function call in default arg — this is how FastAPI Depends works
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S105", "S106"]  # hardcoded test passwords are intentional
+# assert is what pytest is built on. Scoped to tests rather than ignored
+# globally: `python -O` strips asserts, so one in src/ standing in for a
+# check is a real bug, and the global ignore was hiding that.
+"tests/*" = ["S101", "S105", "S106"]  # hardcoded test passwords are intentional
+"scripts/*" = ["S101"]
 
 # ---------------------------------------------------------------------------
 # Types

@@ -35,7 +35,15 @@ jobs:
 
       - name: Audit
         working-directory: services/api
-        run: pip-audit --strict --progress-spinner off
+        # Audits the resolved dependency tree, with this project's own
+        # unpublished package excluded. Auditing the environment directly
+        # fails on nova-api itself ("not found on PyPI"), and --skip-editable
+        # does not help: --strict treats a skipped package as an error too.
+        # Dropping --strict instead would let a genuinely unauditable
+        # dependency pass silently, which is the opposite of the point.
+        run: |
+          pip freeze --exclude-editable > /tmp/resolved-requirements.txt
+          pip-audit --strict --progress-spinner off -r /tmp/resolved-requirements.txt
 
   secrets:
     name: Secret scanning
