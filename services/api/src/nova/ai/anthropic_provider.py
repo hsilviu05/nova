@@ -7,7 +7,7 @@ configuration change rather than a refactor.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import anthropic
@@ -66,7 +66,7 @@ class AnthropicChatProvider:
 
     # -- requests ---------------------------------------------------------
 
-    async def stream(self, request: ChatRequest) -> AsyncIterator[str]:
+    async def stream(self, request: ChatRequest) -> AsyncGenerator[str, None]:
         """Yield reply text as the model produces it.
 
         Raises:

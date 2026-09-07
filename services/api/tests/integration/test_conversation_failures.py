@@ -8,6 +8,8 @@ conversation in a coherent state.
 
 from __future__ import annotations
 
+import asyncio
+import gc
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -70,6 +72,40 @@ class TruncatingProvider:
     async def complete(self, request: ChatRequest) -> ChatCompletion:
         return ChatCompletion(
             text=self._text, model=self.model, usage=TokenUsage(), stop_reason="end_turn"
+        )
+
+
+class ClosureRecordingProvider:
+    """Streams a few words and records which task closed the stream.
+
+    A generator closed by its consumer runs its ``finally`` in the consumer's
+    task. One abandoned to the garbage collector runs it in the finalizer
+    task asyncio schedules instead -- often within the same tick, so the
+    frame is gone either way by the time a test can look. The task is the
+    tell.
+    """
+
+    def __init__(self) -> None:
+        self.closed_in: asyncio.Task[Any] | None = None
+
+    @property
+    def name(self) -> str:
+        return "recording"
+
+    @property
+    def model(self) -> str:
+        return "recording-model"
+
+    async def stream(self, request: ChatRequest) -> AsyncIterator[str]:
+        try:
+            for word in ("I", "was", "about", "to", "say"):
+                yield word + " "
+        finally:
+            self.closed_in = asyncio.current_task()
+
+    async def complete(self, request: ChatRequest) -> ChatCompletion:
+        return ChatCompletion(
+            text="I was about to say", model=self.model, usage=TokenUsage(), stop_reason="end_turn"
         )
 
 
@@ -339,3 +375,88 @@ class TestClientDisconnect:
         # leave a question with no answer in the thread the user reopens.
         assert len(stored) == 1
         assert stored[0].content == first
+
+    async def test_closing_the_response_body_persists_the_reply_at_once(
+        self, session_factory, settings
+    ) -> None:
+        """The route's body generator, one layer out from the streamer.
+
+        Starlette never closes the body it is handed on a disconnect; the
+        garbage collector does, eventually. So closing the body has to be
+        enough on its own: it must close the streamer inside it in the same
+        step. Delegating with ``async for`` would leave the streamer
+        suspended, and the partial reply would be persisted only one
+        collection later, as a detached task on a session of its own.
+        """
+        import inspect
+
+        from sqlalchemy import select
+
+        from nova.api.v1.conversations import _reply_events
+        from nova.models.conversation import Conversation, Message
+        from nova.models.user import User
+        from nova.services.conversation import ChatStreamer
+
+        async with session_factory() as session:
+            user = User(
+                email=f"disconnect-{uuid.uuid4().hex[:8]}@example.com",
+                password_hash="x",
+                display_name="Tester",
+            )
+            session.add(user)
+            await session.flush()
+            conversation = Conversation(user_id=user.id)
+            session.add(conversation)
+            await session.commit()
+            conversation_id = conversation.id
+            owner_id = user.id
+
+        provider = ClosureRecordingProvider()
+        streamer = ChatStreamer(
+            session_factory=session_factory,
+            provider=provider,
+            settings=settings.ai,
+        )
+        turn = await streamer.prepare(conversation_id, owner_id, "Cut me off")
+
+        reply: list[str] = []
+        body = _reply_events(streamer, conversation_id, turn, reply)
+        await anext(body)  # the echoed user turn
+        await anext(body)  # the first delta
+        await body.aclose()
+
+        assert reply, "the first delta should have been received"
+
+        # Persisted now -- not after the next collection.
+        async with session_factory() as session:
+            stored = (
+                (
+                    await session.execute(
+                        select(Message).where(
+                            Message.conversation_id == conversation_id,
+                            Message.role == "assistant",
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert len(stored) == 1
+        # And it is exactly what the client was sent, no more.
+        assert stored[0].content == "".join(reply)
+
+        # The streamer was closed rather than left suspended for the
+        # collector: no live generator of it is still holding a frame.
+        suspended = [
+            obj
+            for obj in gc.get_objects()
+            if inspect.isasyncgen(obj)
+            and obj.ag_frame is not None
+            and obj.ag_code is ChatStreamer.stream.__code__
+        ]
+        assert suspended == []
+
+        # And the same close reached the provider's stream inside the
+        # streamer, in this task -- not in a finalizer task the collector
+        # scheduled after the streamer's own ``async for`` let go of it.
+        assert provider.closed_in is asyncio.current_task()

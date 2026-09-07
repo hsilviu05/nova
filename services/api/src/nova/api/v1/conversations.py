@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
@@ -37,7 +38,7 @@ from nova.schemas.conversation import (
     MessageExchange,
     SendMessageRequest,
 )
-from nova.services.conversation import ChatStreamer, ConversationService
+from nova.services.conversation import ChatStreamer, ConversationService, PreparedTurn
 from nova.services.memory import MemoryRecorder
 from nova.services.rate_limit import RateLimiter
 
@@ -183,27 +184,10 @@ async def stream_message(
 
     turn = await streamer.prepare(conversation_id, current_user.id, payload.content)
 
-    # Filled by the generator, read by the background task. Safe only because
-    # Starlette runs the background task strictly after the body is finished.
+    # Filled by the body generator, read by the background task. Safe only
+    # because Starlette runs the background task strictly after the body is
+    # finished.
     reply: list[str] = []
-
-    async def events() -> AsyncIterator[str]:
-        # Echo the stored user turn first so the client can replace its
-        # optimistic copy with the real id.
-        yield _event("message", turn.user_message.model_dump(mode="json"))
-
-        try:
-            async for chunk in streamer.stream(conversation_id, turn.history, turn.context):
-                reply.append(chunk)
-                yield _event("delta", {"text": chunk})
-        except AIProviderError as exc:
-            # Only reachable before any text was produced; the streamer
-            # swallows a mid-stream failure and keeps the partial reply.
-            logger.info("stream_failed", code=exc.code)
-            yield _event("error", {"code": exc.code, "message": exc.message})
-            return
-
-        yield _event("done", {"conversation_id": str(conversation_id)})
 
     async def remember() -> None:
         """Extract memories once the stream has been delivered.
@@ -221,7 +205,7 @@ async def stream_message(
         )
 
     return StreamingResponse(
-        events(),
+        _reply_events(streamer, conversation_id, turn, reply),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -230,6 +214,47 @@ async def stream_message(
         },
         background=BackgroundTask(remember),
     )
+
+
+async def _reply_events(
+    streamer: ChatStreamer,
+    conversation_id: uuid.UUID,
+    turn: PreparedTurn,
+    reply: list[str],
+) -> AsyncIterator[str]:
+    """The event-stream body: the stored user turn, the deltas, then done.
+
+    Chunks are also appended to ``reply`` for the background task.
+
+    The streamer is held in ``aclosing`` because of how this body ends when
+    the client goes away. Starlette does not close the body iterator on a
+    disconnect; it leaves this generator to the garbage collector, and
+    asyncio finalizes an abandoned async generator as a detached task. That
+    much is outside this module's control. What is in its control is what
+    happens when that close finally comes: ``async for`` alone would leave
+    the streamer suspended in turn, so the streamer's persist-on-close
+    ``finally`` -- the write that keeps a half-received reply -- would run
+    one more collection later still, as yet another detached task. Closing
+    the streamer here makes that write happen in the same step as this
+    generator's close, whoever performs it and whenever it comes.
+    """
+    # Echo the stored user turn first so the client can replace its
+    # optimistic copy with the real id.
+    yield _event("message", turn.user_message.model_dump(mode="json"))
+
+    try:
+        async with aclosing(streamer.stream(conversation_id, turn.history, turn.context)) as chunks:
+            async for chunk in chunks:
+                reply.append(chunk)
+                yield _event("delta", {"text": chunk})
+    except AIProviderError as exc:
+        # Only reachable before any text was produced; the streamer
+        # swallows a mid-stream failure and keeps the partial reply.
+        logger.info("stream_failed", code=exc.code)
+        yield _event("error", {"code": exc.code, "message": exc.message})
+        return
+
+    yield _event("done", {"conversation_id": str(conversation_id)})
 
 
 async def _enforce_limit(
