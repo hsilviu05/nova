@@ -192,6 +192,11 @@ jobs:
           PY
 
       - name: Compare Swift models against the schema
+        # The workflow defaults every step to services/api; this script lives
+        # at the repository root, so it needs the override. Without it the
+        # step fails with "no such file" -- which went unnoticed because the
+        # export above was failing first, and a skipped step reports nothing.
+        working-directory: .
         run: python scripts/check_ios_contract.py services/api/openapi.json
 
   migrations:
