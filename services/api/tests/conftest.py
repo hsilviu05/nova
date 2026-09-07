@@ -22,7 +22,14 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.pool import NullPool
 
 from nova.ai.base import ChatProvider, EmbeddingProvider
 from nova.ai.registry import build_chat_provider, build_embedding_provider
@@ -37,7 +44,6 @@ from nova.core.config import (
 from nova.core.security import Argon2PasswordHasher, TokenService
 from nova.db.base import Base
 from nova.db.redis import create_redis
-from nova.db.session import create_engine
 from nova.main import create_app
 from nova.services.connections import InMemoryConnectionRegistry
 
@@ -118,8 +124,40 @@ def settings() -> Settings:
 
 @pytest.fixture(scope="session")
 async def engine(settings: Settings) -> AsyncIterator[AsyncEngine]:
-    """Session-scoped engine with the schema created once."""
-    engine = create_engine(settings.database)
+    """Session-scoped engine with the schema created once.
+
+    ``NullPool``, unlike production, and this is the one thing about the test
+    engine that is load-bearing rather than incidental.
+
+    pytest-asyncio runs async fixture setup and teardown in *different tasks*
+    -- the WebSocket tests below already have to work around it. So the
+    ``connection`` fixture's teardown (roll back, hand the connection back)
+    is not guaranteed to have finished when the next test's setup checks one
+    out. With a pool, the next test can be given a connection whose previous
+    owner is still releasing it, and asyncpg says so in two ways that look
+    like unrelated bugs:
+
+        cannot perform operation: another operation is in progress
+        cannot use Connection.transaction() in a manually started transaction
+
+    That surfaced once in CI as two errors in the device tests and did not
+    reproduce locally in a hundred runs, because it needs a loaded machine to
+    widen the window. NullPool removes the coupling instead of narrowing it:
+    every test opens its own connection and closes it, so a slow teardown can
+    delay the next test but cannot corrupt it.
+
+    The cost is measured, not assumed: 455 tests go from ~25.7s to ~38s
+    locally, about 27ms per test for connecting and authenticating. That is
+    a real price and it is worth paying. A pool that hands out a connection
+    another task has not finished with does not only produce errors -- it can
+    just as easily produce a test that passes against someone else's
+    transaction, and a suite that lies occasionally is worth less than a
+    suite that is twelve seconds slower.
+    """
+    # Built here rather than via create_engine(): that shapes a pool for
+    # production (size, overflow, recycle, pre-ping), none of which applies
+    # when there is no pool.
+    engine = create_async_engine(settings.database.dsn(), poolclass=NullPool)
     async with engine.begin() as conn:
         # The migrations enable this; ``create_all`` does not, and the
         # memories table cannot be built without the vector type.
