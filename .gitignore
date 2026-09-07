@@ -80,10 +80,18 @@ firmware/build/
 firmware/managed_components/
 firmware/dependencies.lock
 
-# Xcode. NOVA.xcodeproj is GENERATED from apps/ios/project.yml by XcodeGen --
-# committing it would reintroduce the merge conflicts that spec exists to
-# avoid. Run `xcodegen generate` after cloning.
-*.xcodeproj
+# Xcode.
+#
+# NOVA.xcodeproj IS tracked, which reverses the original decision and is worth
+# saying why. project.yml remains the source of truth: the project is
+# generated from it by XcodeGen, or by apps/ios/tools/generate_xcodeproj.py
+# where there is no Swift toolchain. Tracking the result means the repository
+# can be cloned and opened, with no toolchain and no Homebrew, which turned
+# out to matter more than the merge conflicts it costs. Regenerate rather than
+# resolve a conflict in it -- the generator is deterministic, so the output is
+# byte-identical for a given spec.
+#
+# Everything genuinely per-user stays ignored.
 *.xcworkspace
 xcuserdata/
 DerivedData/

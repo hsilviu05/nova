@@ -16,16 +16,37 @@ Native SwiftUI client. **Phase 3.**
 
 ## Running it
 
+`NOVA.xcodeproj` is committed, so this is the whole of it:
+
 ```bash
-brew install xcodegen        # once
 cd apps/ios
-xcodegen generate
 open NOVA.xcodeproj
 ```
 
-Prefer not to install XcodeGen? Create an iOS App target named `NOVA` in
-Xcode and add the `NOVA/` directory. Nothing in the sources depends on
-`project.yml`.
+`project.yml` is still the source of truth. The project is generated from it,
+two ways, and both produce the same thing:
+
+```bash
+xcodegen generate                        # brew install xcodegen
+python3 tools/generate_xcodeproj.py      # no Swift toolchain needed
+```
+
+Regenerate rather than resolve a merge conflict in the project file. Both
+generators are deterministic for a given spec, so the output is stable and a
+diff shows real changes rather than churn.
+
+`tools/generate_xcodeproj.py` exists because NOVA is developed mostly in a
+Linux container where there is no Swift toolchain and therefore no XcodeGen.
+It understands only the subset of `project.yml` this project uses — two
+targets, Swift sources, one resource, build settings. It is not an XcodeGen
+replacement, and if the spec grows past what it handles it should be deleted
+rather than extended into a bad clone.
+
+> The generated project has been parsed back and checked — every source file
+> on disk is referenced, no reference dangles, both targets carry the right
+> product types and configurations, and the test target depends on the app.
+> It has **not** been opened in Xcode, because there is no Mac here. If it
+> refuses to open, `xcodegen generate` overwrites it and is authoritative.
 
 The backend must be running:
 
