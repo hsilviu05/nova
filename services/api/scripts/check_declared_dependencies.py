@@ -16,6 +16,15 @@ An undeclared dependency is invisible to every check that runs inside the
 environment that already has it. So this compares imports against the
 declared metadata, not against what happens to be installed.
 
+It also distinguishes runtime from the dev extras, because of a second real
+failure. `httpx` was declared -- but only under `[dev]`. A new module under
+`src/` imported it, every test passed because the test venv installs the
+extras, and the production image failed at import with
+`ModuleNotFoundError: No module named 'httpx'`. The first version of this
+script counted extras as declared and let it through. Now anything imported
+under `src/` must be in `dependencies`; `tests/` and `scripts/` may also
+use the extras.
+
     python scripts/check_declared_dependencies.py
 
 Exits non-zero if anything is imported but undeclared.
@@ -32,6 +41,7 @@ from pathlib import Path
 SERVICE = Path(__file__).resolve().parent.parent
 SOURCE = SERVICE / "src" / "nova"
 TESTS = SERVICE / "tests"
+SCRIPTS = SERVICE / "scripts"
 PYPROJECT = SERVICE / "pyproject.toml"
 
 # The package's own name, which is not a third-party import.
@@ -61,12 +71,7 @@ def imported_modules(root: Path) -> dict[str, str]:
     return found
 
 
-def declared(project: dict) -> set[str]:
-    """Distribution names declared in pyproject, normalised."""
-    requirements: list[str] = list(project.get("dependencies", []))
-    for group in project.get("optional-dependencies", {}).values():
-        requirements.extend(group)
-
+def _names(requirements: list[str]) -> set[str]:
     names = set()
     for requirement in requirements:
         # "sqlalchemy[asyncio]>=2.0.36,<2.1" -> "sqlalchemy"
@@ -77,6 +82,20 @@ def declared(project: dict) -> set[str]:
     return names
 
 
+def declared(project: dict) -> tuple[set[str], set[str]]:
+    """(runtime, runtime + extras) distribution names, normalised.
+
+    Kept apart on purpose. Code under ``src/`` ships in the image, which is
+    built from ``dependencies`` alone; the extras exist only where somebody
+    asked for them.
+    """
+    runtime = _names(list(project.get("dependencies", [])))
+    everything = set(runtime)
+    for group in project.get("optional-dependencies", {}).values():
+        everything |= _names(list(group))
+    return runtime, everything
+
+
 def normalise(name: str) -> str:
     """PEP 503 name normalisation: `pytest-asyncio` and `pytest_asyncio` are one."""
     return name.lower().replace("_", "-").replace(".", "-")
@@ -84,14 +103,21 @@ def normalise(name: str) -> str:
 
 def main() -> int:
     project = tomllib.loads(PYPROJECT.read_text())["project"]
-    declared_names = declared(project)
+    runtime, everything = declared(project)
     module_to_dist = packages_distributions()
 
     problems: list[str] = []
     checked = 0
 
-    for root in (SOURCE, TESTS):
-        if not root.exists():  # pragma: no cover - both exist in this repo
+    # What each tree is allowed to import. src/ ships; the rest does not.
+    scopes = (
+        (SOURCE, runtime, "runtime"),
+        (TESTS, everything, "dev"),
+        (SCRIPTS, everything, "dev"),
+    )
+
+    for root, allowed, label in scopes:
+        if not root.exists():  # pragma: no cover - all exist in this repo
             continue
 
         for module, first_seen in sorted(imported_modules(root).items()):
@@ -107,7 +133,15 @@ def main() -> int:
                 problems.append(f"  {module:24} imported by {first_seen} — not installed")
                 continue
 
-            if not any(normalise(dist) in declared_names for dist in distributions):
+            if any(normalise(dist) in allowed for dist in distributions):
+                continue
+
+            if label == "runtime" and any(normalise(dist) in everything for dist in distributions):
+                problems.append(
+                    f"  {module:24} imported by {first_seen} — "
+                    f"declared only as a dev extra; src/ ships without the extras"
+                )
+            else:
                 problems.append(
                     f"  {module:24} imported by {first_seen} — "
                     f"provided by {', '.join(sorted(distributions))}, not declared"
