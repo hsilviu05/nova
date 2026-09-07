@@ -6,22 +6,31 @@
 # committed. Each line here is one specific string at one specific commit,
 # looked at by a person, and anything new in the same file still fails.
 #
+# The findings are described rather than quoted. Reproducing the flagged
+# string here would make this file its own finding at a new fingerprint --
+# which is exactly what the first version of it did.
+#
 # Format: <commit>:<path>:<rule>:<line>
 
-# "Uses the token = abc123def456"
-#
 # A parameter in the test suite for NOVA's own secret detector. The test
-# feeds looks_sensitive() a list of strings that look like credentials and
+# feeds looks_sensitive() a list of strings shaped like credentials and
 # asserts every one is refused before it can reach the memory store. The
-# string has to look like a secret or the test proves nothing -- so the
-# scanner flagging it is the test working, one layer up.
+# string has to look like a secret or the test proves nothing, so the scanner
+# flagging it is the test working, one layer up.
 6ae610b685e6cfc1d1a375b6a2900f10c66e4750:services/api/tests/unit/test_memory_extraction.py:generic-api-key:174
 
-# "refresh_token": "IZvj3IvPwfzV6xKH--epYNLCXNpJqR3x"
-#
-# A fixture in the iOS JSON decoding tests. It is a random string typed to
-# stand in for a server-issued refresh token so the decoder can be checked
-# against the shape of a real response; it was never issued by anything and
-# authenticates nothing. The API's refresh tokens are opaque, single-use,
-# and rotated, so even a genuine one would be dead on arrival.
+# A stand-in refresh token in the iOS JSON decoding tests: a random string
+# typed to give the decoder the shape of a real response. It was never issued
+# by anything and authenticates nothing. The API's refresh tokens are opaque,
+# single-use and rotated, so even a genuine one would be dead on arrival.
 3df690dc15c1367643d6187da47ffe2d07f717d0:apps/ios/NOVATests/DecodingTests.swift:generic-api-key:61
+
+# The two above, quoted verbatim in the first version of THIS file at commit
+# b302b8b, which made the ignore file its own finding. The strings were
+# removed in the very next commit; these two lines retire the finding in the
+# history that still carries them.
+#
+# Worth leaving as a note to whoever writes the next allowlist: describe what
+# was flagged, never paste it.
+b302b8b096f858ca7926874b410c5c4207cd7b31:.gitleaksignore:generic-api-key:11
+b302b8b096f858ca7926874b410c5c4207cd7b31:.gitleaksignore:generic-api-key:20
