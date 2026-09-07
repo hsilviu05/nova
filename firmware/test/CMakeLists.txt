@@ -40,7 +40,7 @@ target_link_libraries(nova_core PUBLIC cjson)
 
 enable_testing()
 
-set(SUITES geometry behaviour protocol pca9685 outbox connection)
+set(SUITES geometry behaviour protocol pca9685 outbox connection rangefinder)
 
 foreach(suite IN LISTS SUITES)
     add_executable(test_${suite} test_${suite}.cpp)
