@@ -373,7 +373,7 @@ being unreachable.
 | **1** | Backend foundation: API, Postgres, Redis, Docker, migrations, auth, logging | ✅ **Complete** |
 | **2** | Device platform: claim flow, device auth, WebSocket protocol, telemetry | ✅ **Complete** |
 | **3** | iOS foundation: SwiftUI app, auth, device claiming, home screen | ⚠️ **Written, not compiled** |
-| **4** | AI chat: provider abstraction, conversations, streaming | ✅ **Backend complete**, iOS uncompiled |
+| **4** | AI chat: provider abstraction, conversations, streaming | ✅ **Backend complete** — Anthropic, local Ollama, or offline; iOS uncompiled |
 | **5** | Semantic memory: extraction, embeddings, pgvector retrieval | ✅ **Backend complete**, iOS uncompiled |
 | **6** | Physical robot: servos, animated AMOLED face, audio, proximity, IMU | ⏳ **Core, drivers, face and ESP-IDF layer written**; the core is tested, the device layer is uncompiled, and nothing has run on hardware |
 | **7** | Telemetry and analytics: aggregation, insights screen | ✅ **Backend complete**, iOS uncompiled |

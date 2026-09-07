@@ -12,6 +12,7 @@ from nova.ai.base import ChatProvider, EmbeddingProvider
 from nova.ai.errors import AIConfigurationError
 from nova.ai.lexical_embeddings import LexicalEmbeddingProvider
 from nova.ai.offline import OfflineChatProvider, OfflineEmbeddingProvider
+from nova.ai.ollama_provider import OllamaChatProvider
 from nova.core.config import AISettings
 from nova.core.logging import get_logger
 from nova.models.memory import EMBEDDING_DIMENSIONS
@@ -51,6 +52,18 @@ def build_chat_provider(settings: AISettings) -> ChatProvider:
                 model=settings.chat_model,
                 timeout_seconds=settings.request_timeout_seconds,
                 enable_fallbacks=settings.enable_refusal_fallbacks,
+            )
+
+        case "ollama":
+            # No degraded fallback here, unlike anthropic-without-a-key: a
+            # missing credential is known at boot, but whether a local server
+            # is up is a runtime fact. If it is not, every call raises
+            # AIUnavailableError and the API answers 503, which is the truth.
+            return OllamaChatProvider(
+                base_url=settings.ollama_base_url,
+                model=settings.ollama_model,
+                timeout_seconds=settings.request_timeout_seconds,
+                keep_alive=settings.ollama_keep_alive,
             )
 
         case unknown:  # pragma: no cover - guarded by the settings Literal

@@ -130,9 +130,23 @@ class AISettings(BaseModel):
     degrades back to offline with a warning rather than refusing to boot.
     """
 
-    chat_provider: Literal["anthropic", "offline"] = "offline"
+    chat_provider: Literal["anthropic", "ollama", "offline"] = "offline"
     chat_model: str = "claude-opus-5"
     anthropic_api_key: SecretStr | None = None
+
+    # A local model through Ollama, running natively on the host -- not in
+    # the compose stack, where it could not reach the GPU. From inside the
+    # api container the host is host.docker.internal; on the host itself it
+    # is localhost. Nothing leaves the machine.
+    ollama_base_url: str = "http://localhost:11434"
+    # Apache-2.0, good at structured JSON (memory extraction needs it), and
+    # about 5 GB at the default quantisation -- it leaves a 24 GB machine
+    # room for Docker, Postgres and the API. See ADR 014 for the step up.
+    ollama_model: str = "qwen2.5:7b"
+    # Ollama unloads an idle model after five minutes by default. A desk
+    # companion is talked to sporadically, so that default would put a cold
+    # load of tens of gigabytes in front of most replies.
+    ollama_keep_alive: str = "30m"
 
     request_timeout_seconds: float = Field(default=60.0, gt=0)
     # Replies from a desk companion are a few sentences. A generous cap

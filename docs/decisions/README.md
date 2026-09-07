@@ -18,6 +18,8 @@ built, but the reasoning disappears unless it is written down.
 | [010](010-streaming-and-offline-ai.md) | Streaming chat over SSE, with an offline provider | Accepted |
 | [011](011-lexical-embeddings-and-memory-extraction.md) | Lexical embeddings, and extracting memory after the reply | Accepted |
 | [012](012-analytics-in-sql-and-gated-insights.md) | Aggregation in SQL, and insights that refuse to guess | Accepted |
+| [013](013-ml-pipeline-guarantees.md) | The ML pipeline's guarantees are code, not conventions | Accepted |
+| [014](014-local-llm-via-ollama.md) | A local model through Ollama, natively on the host | Accepted |
 
 Format: Context, Decision, Alternatives considered, Consequences.
 
