@@ -1,0 +1,27 @@
+# Findings reviewed and accepted, by fingerprint.
+#
+# Fingerprints rather than path or regex allowlists, deliberately. A rule
+# like "ignore anything under tests/" would also hide a real credential
+# pasted into a test tomorrow, which is a likely way for one to get
+# committed. Each line here is one specific string at one specific commit,
+# looked at by a person, and anything new in the same file still fails.
+#
+# Format: <commit>:<path>:<rule>:<line>
+
+# "Uses the token = abc123def456"
+#
+# A parameter in the test suite for NOVA's own secret detector. The test
+# feeds looks_sensitive() a list of strings that look like credentials and
+# asserts every one is refused before it can reach the memory store. The
+# string has to look like a secret or the test proves nothing -- so the
+# scanner flagging it is the test working, one layer up.
+6ae610b685e6cfc1d1a375b6a2900f10c66e4750:services/api/tests/unit/test_memory_extraction.py:generic-api-key:174
+
+# "refresh_token": "IZvj3IvPwfzV6xKH--epYNLCXNpJqR3x"
+#
+# A fixture in the iOS JSON decoding tests. It is a random string typed to
+# stand in for a server-issued refresh token so the decoder can be checked
+# against the shape of a real response; it was never issued by anything and
+# authenticates nothing. The API's refresh tokens are opaque, single-use,
+# and rotated, so even a genuine one would be dead on arrival.
+3df690dc15c1367643d6187da47ffe2d07f717d0:apps/ios/NOVATests/DecodingTests.swift:generic-api-key:61
