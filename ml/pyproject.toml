@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nova-ml"
+version = "0.1.0"
+description = "NOVA behavioural ML: will the user interact in the next 10 minutes?"
+requires-python = ">=3.12"
+# Two runtime dependencies, both BSD-3.
+#
+# numpy: every feature is a strictly-past window over a sorted timestamp
+# array, which is a searchsorted, not a DataFrame. pandas' rolling windows
+# can express "closed on the left" but the leakage guarantee is then a
+# keyword argument somebody can drop; here it is the shape of the code and
+# a test.
+#
+# scikit-learn: the three models and the metrics. Writing logistic
+# regression by hand would be the least reviewed numerical code in the
+# repository.
+dependencies = [
+    "numpy>=2,<3",
+    "scikit-learn>=1.5,<2",
+    # Model persistence. Ships with scikit-learn, and is declared here
+    # because it is imported directly -- an undeclared import works only
+    # where something else happened to install it.
+    "joblib>=1.3,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9,<10",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[tool.setuptools.packages.find]
+include = ["nova_ml*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "S", "SIM", "RUF"]
+# X is the conventional name for a design matrix, here and in every
+# scikit-learn example; renaming it to satisfy pep8-naming would make the
+# code read worse to anyone who has done this before.
+ignore = ["N806", "N815"]
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["nova_ml"]
+[[tool.mypy.overrides]]
+module = ["sklearn.*", "joblib.*"]
+ignore_missing_imports = true
