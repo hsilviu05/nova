@@ -10,7 +10,7 @@ methods that raise.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Literal, Protocol, runtime_checkable
 
@@ -85,12 +85,17 @@ class ChatProvider(Protocol):
     @property
     def model(self) -> str: ...
 
-    def stream(self, request: ChatRequest) -> AsyncIterator[str]:
+    def stream(self, request: ChatRequest) -> AsyncGenerator[str, None]:
         """Yield reply text as it is produced.
 
         Streaming is the primary interface because the chat UI shows tokens
         as they arrive, and because a long reply on a non-streaming call can
         exceed an HTTP timeout.
+
+        An async *generator*, not merely an iterator: when the consumer goes
+        away mid-reply the caller closes it with ``aclosing``, and a provider
+        holding a connection open -- the Anthropic stream -- releases it in
+        that close rather than whenever the garbage collector gets to it.
         """
         ...
 

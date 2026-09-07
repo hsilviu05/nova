@@ -16,7 +16,7 @@ for one in a demo.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 
 from nova.ai.base import ChatCompletion, ChatRequest, TokenUsage
 
@@ -54,7 +54,7 @@ class OfflineChatProvider:
     def model(self) -> str:
         return "offline-deterministic"
 
-    async def stream(self, request: ChatRequest) -> AsyncIterator[str]:
+    async def stream(self, request: ChatRequest) -> AsyncGenerator[str, None]:
         text = self._reply_for(request)
         for index in range(0, len(text), self._chunk_size):
             yield text[index : index + self._chunk_size]

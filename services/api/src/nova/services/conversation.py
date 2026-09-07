@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -287,7 +288,7 @@ class ChatStreamer:
         conversation_id: uuid.UUID,
         history: list[ChatMessage],
         context: str | None = None,
-    ) -> AsyncIterator[str]:
+    ) -> AsyncGenerator[str, None]:
         """Yield reply text, persisting whatever was produced.
 
         Raises:
@@ -301,16 +302,23 @@ class ChatStreamer:
         failed: AIProviderError | None = None
 
         try:
-            async for chunk in self._provider.stream(
-                ChatRequest(
-                    system=build_system_prompt(self._persona),
-                    messages=history,
-                    context=context,
-                    max_tokens=self._settings.max_reply_tokens,
+            # ``aclosing``: closing this generator must close the provider's
+            # stream in the same step. ``async for`` on its own would leave
+            # the provider suspended for the garbage collector -- and for the
+            # Anthropic provider that is an open HTTP stream.
+            async with aclosing(
+                self._provider.stream(
+                    ChatRequest(
+                        system=build_system_prompt(self._persona),
+                        messages=history,
+                        context=context,
+                        max_tokens=self._settings.max_reply_tokens,
+                    )
                 )
-            ):
-                chunks.append(chunk)
-                yield chunk
+            ) as provider_chunks:
+                async for chunk in provider_chunks:
+                    chunks.append(chunk)
+                    yield chunk
         except AIProviderError as exc:
             failed = exc
             if not chunks:
