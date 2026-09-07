@@ -41,6 +41,11 @@ dependencies = [
     # Runtime even though the default provider is offline: the module is
     # imported when the provider registry is built, not when a key is set.
     "anthropic>=1.0,<2",
+    # The Ollama adapter speaks plain HTTP through httpx. A runtime
+    # dependency, not a test one: for a while it was only in the dev extras,
+    # the tests had it, and the production image did not -- the API failed
+    # at import with ModuleNotFoundError while every test stayed green.
+    "httpx>=0.28,<0.29",
     # Security. argon2id is the OWASP first-choice password KDF; PyJWT signs
     # and verifies the access tokens.
     "argon2-cffi>=23.1,<26",
@@ -55,7 +60,6 @@ dev = [
     "pytest>=9.0.3,<10",
     "pytest-asyncio>=1.0,<2",
     "pytest-cov>=6.0,<8",
-    "httpx>=0.28,<0.29",
     # httpx has no WebSocket transport, and Starlette TestClient runs the app
     # in its own event loop and connection -- which would neither share the
     # test transaction nor stay on the loop the session engine is bound to.
