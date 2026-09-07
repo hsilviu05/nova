@@ -4,6 +4,7 @@ idf_component_register(
         "i2c_bus.cpp"
         "servos.cpp"
         "distance.cpp"
+        "display.cpp"
         "nvs_store.cpp"
         "wifi.cpp"
         "ws_link.cpp"
@@ -16,6 +17,7 @@ idf_component_register(
         esp_netif
         nvs_flash
         esp_timer
+        esp_lcd
         esp-tls
 )
 

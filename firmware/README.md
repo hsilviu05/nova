@@ -36,9 +36,10 @@ judgement lives, and there is a test for it.
 | `core/rangefinder.hpp` — reading validity, median filter | **Done, tested** |
 | `core/outbox.hpp` — offline telemetry queue | **Done, tested** |
 | `core/connection.*` — reconnect policy | **Done, tested** |
-| `main/` — I²C, servos, rangefinder, NVS, WiFi, WebSocket | Written, **never compiled** |
-| Face rendering | Not started |
-| Provisioning UI (needs the panel) | Not started |
+| `core/face.*` — expressions, blinking, gaze, rasterising | **Done, tested** |
+| `main/` — I²C, servos, rangefinder, NVS, WiFi, WebSocket, panel | Written, **never compiled** |
+| Panel controller bring-up | Not started — needs the board |
+| Provisioning UI | Not started |
 
 **Nothing here has run on hardware.** There is no board yet. What *is* true
 is that everything in `core/` compiles under `-Wall -Wextra -Wpedantic
@@ -61,6 +62,7 @@ line into `core/`, where a test can reach it.
 | `i2c_bus.*` | The one shared bus, with the mutex that makes two tasks safe |
 | `servos.*` | Replays `core/pca9685` sequences; releases the head when idle |
 | `distance.*` | VL53L0X single-shot reads, fed into `core/rangefinder` |
+| `display.*` | Framebuffer in PSRAM, span blitting, dirty-region flush |
 | `nvs_store.*` | WiFi credentials and the device token. Logged nowhere |
 | `wifi.*` | Station mode; distinguishes a refused password from no network |
 | `ws_link.*` | The WebSocket, and reading close code 4001 |
@@ -83,8 +85,14 @@ line into `core/`, where a test can reach it.
   which is a production step, not something the firmware can do to itself. An
   attacker with physical access and a flash reader can read the device token;
   the mitigation is that it is revocable from the dashboard.
-- **Face rendering does not exist.** State changes are logged so a bring-up
-  session can watch the engine work without a screen.
+- **The panel controller is not chosen.** `Display::begin` takes an
+  already-initialised `esp_lcd_panel_handle_t`, and nothing here creates one.
+  An AMOLED's initialisation is a vendor-specific command list, and inventing
+  one from memory is how a display stays black with no error to explain it —
+  the same reason the rangefinder runs on factory defaults. Add the vendor
+  component for the board in hand and pass the handle in; everything above
+  that line is written and tested. Until then the face falls back to logging
+  its state changes, so a bring-up session can still watch the engine work.
 
 ## Running the tests
 
@@ -124,6 +132,46 @@ annoying:
 Each is a case. Each was verified by breaking the guard and watching the
 right test fail — presence hysteresis, the debounce, and the picked-up
 priority were all checked that way.
+
+## The face
+
+The product thesis is a desk creature, not a speaker with a screen, so the
+face is where it stands or falls (ADR 008). An AMOLED renders true black — an
+unlit pixel emits nothing — so eyes drawn on it float in the bezel rather than
+sitting on a visible rectangle. The background is therefore never drawn: not
+drawing it is both the correct look and free.
+
+The expressive vocabulary is deliberately small. Each eye is a filled rounded
+rectangle with a position, a size and a corner radius. No pupils, no slanted
+lids, no brows. Cozmo and Vector do more, but they blit whole frames; NOVA
+emits two rectangles, and openness, vertical offset, gaze and asymmetry
+between the two eyes turn out to carry all ten behaviour states.
+
+What makes it read as alive is in `core/`, where tests can reach it:
+
+- **Blinking on a randomised interval.** A metronomic blink is the clearest
+  tell that something is a machine — people notice without being able to say
+  why. Gaps are 2.2–7 s, and there is a test that the gaps actually differ.
+- **Idle gaze drift.** Eyes holding one position perfectly read as a doll.
+  Both eyes drift together; independently drifting eyes read as a fault.
+- **Eased transitions.** Linear interpolation starts and stops abruptly,
+  which nothing alive does. Integer smoothstep, no FPU.
+- **A shut eye is a line, not nothing.** Collapsing the height to zero makes
+  the face vanish mid-blink, which looks like a crash.
+- **A sleeping face does not blink or drift.** A sleeping face that blinks is
+  not asleep, and drifting behind shut eyes burns the panel for nothing.
+
+And the part that matters for battery: `FaceAnimator::update` returns a frame
+**only when the pixels actually differ**. The panel is the largest draw on the
+board, so a settled face costs no redraws rather than sixty identical ones a
+second. `Display::draw` then sends only the bounding box of the old face and
+the new one — a blink is about 30 KB over the wire instead of 412 KB.
+
+The eyes cannot leave the panel, and that is a `static_assert` rather than a
+runtime clamp. A clamp would be an unreachable branch no test could exercise,
+and it would silently distort the face if it ever fired. Widen
+`kSaccadeRangeX` past what the margins allow and the build fails naming the
+constant.
 
 ## The protocol is checked against the server, both ways
 

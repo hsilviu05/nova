@@ -32,6 +32,7 @@ target_compile_options(cjson PRIVATE -w)
 add_library(nova_core
     ../core/src/behaviour.cpp
     ../core/src/connection.cpp
+    ../core/src/face.cpp
     ../core/src/pca9685.cpp
     ../core/src/protocol.cpp
 )
@@ -40,7 +41,7 @@ target_link_libraries(nova_core PUBLIC cjson)
 
 enable_testing()
 
-set(SUITES geometry behaviour protocol pca9685 outbox connection rangefinder)
+set(SUITES geometry behaviour protocol pca9685 outbox connection rangefinder face)
 
 foreach(suite IN LISTS SUITES)
     add_executable(test_${suite} test_${suite}.cpp)

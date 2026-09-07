@@ -21,6 +21,7 @@
 #include <new>
 #include <string>
 
+#include "display.hpp"
 #include "distance.hpp"
 #include "esp_log.h"
 #include "esp_random.h"
@@ -32,6 +33,7 @@
 #include "i2c_bus.hpp"
 #include "nova/behaviour.hpp"
 #include "nova/connection.hpp"
+#include "nova/face.hpp"
 #include "nova/outbox.hpp"
 #include "nova/protocol.hpp"
 #include "nvs_store.hpp"
@@ -132,6 +134,7 @@ std::string device_timestamp() {
 struct Peripherals {
     nova::hw::Head head;
     nova::hw::Rangefinder rangefinder;
+    nova::hw::Display display;
 };
 
 /// Bring up the hardware, reporting what is missing rather than refusing to
@@ -176,6 +179,7 @@ void on_frame(const nova::Inbound &frame) {
 
 void run(Peripherals &peripherals, nova::hw::Link &link) {
     nova::BehaviourEngine engine;
+    nova::FaceAnimator animator;
     nova::Outbox<200> outbox;
     nova::ConnectionPolicy policy;
 
@@ -258,12 +262,19 @@ void run(Peripherals &peripherals, nova::hw::Link &link) {
         }
         peripherals.head.tick(tick);
 
-        if (action.redraw_face) {
-            // Face rendering is the remaining piece of this phase. Until the
-            // panel driver exists the state change is logged rather than
-            // silently dropped, so a bring-up session can see the engine
-            // working without a screen attached.
-            ESP_LOGI(kTag, "face -> %s", state_name(action.state));
+        // The face runs every tick, not only on `action.redraw_face`. A
+        // state change is one reason to redraw; a blink is another, and the
+        // engine knows nothing about blinks. The animator returns a frame
+        // only when the pixels actually differ, so asking it every tick costs
+        // nothing when nothing is moving -- which is most of the time.
+        if (auto frame = animator.update(action.state, tick, random_unit())) {
+            if (peripherals.display.available()) {
+                peripherals.display.draw(*frame);
+            } else if (action.redraw_face) {
+                // No panel attached. Logged so a bring-up session can still
+                // watch the behaviour engine work.
+                ESP_LOGI(kTag, "face -> %s", state_name(action.state));
+            }
         }
 
         // -- Telemetry ------------------------------------------------------
