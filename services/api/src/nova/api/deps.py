@@ -82,8 +82,13 @@ def get_password_hasher(request: Request) -> PasswordHasher:
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
-    """Yield the request's unit of work."""
-    async for session in session_scope(request.app.state.session_factory):
+    """Yield the request's unit of work.
+
+    ``async with``, never ``async for``: when a handler raises, FastAPI
+    throws that exception in here, and delegating with ``async for`` would
+    abandon the scope mid-flight instead of unwinding it.
+    """
+    async with session_scope(request.app.state.session_factory) as session:
         yield session
 
 

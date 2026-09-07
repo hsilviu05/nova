@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -38,6 +39,7 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessi
     )
 
 
+@asynccontextmanager
 async def session_scope(
     factory: async_sessionmaker[AsyncSession],
 ) -> AsyncIterator[AsyncSession]:
@@ -45,6 +47,14 @@ async def session_scope(
 
     One transaction per request: handlers never call ``commit`` themselves,
     so a handler that raises halfway through cannot leave a partial write.
+
+    A context manager rather than a bare async generator so that callers
+    close it with ``async with``. A caller that drives it by hand -- or
+    delegates to it with ``async for`` -- leaves it suspended when an
+    exception unwinds the caller, and the session is then closed whenever
+    the garbage collector happens to reach the generator, which asyncio runs
+    as a detached task: a ROLLBACK arriving on a pooled connection that some
+    later request already owns.
     """
     async with factory() as session:
         try:
