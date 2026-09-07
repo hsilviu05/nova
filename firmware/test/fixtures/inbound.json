@@ -1,0 +1,12 @@
+{
+  "head_move": "{\"version\":1,\"id\":\"00000001-0000-4000-8000-000000000000\",\"type\":\"robot.command\",\"command\":\"head.move\",\"payload\":{\"yaw\":30,\"pitch\":-15,\"duration_ms\":800}}",
+  "head_move_defaults": "{\"version\":1,\"id\":\"00000002-0000-4000-8000-000000000000\",\"type\":\"robot.command\",\"command\":\"head.move\",\"payload\":{\"yaw\":0,\"pitch\":0,\"duration_ms\":500}}",
+  "expression": "{\"version\":1,\"id\":\"00000003-0000-4000-8000-000000000000\",\"type\":\"robot.command\",\"command\":\"expression.set\",\"payload\":{\"emotion\":\"curious\",\"intensity\":0.6}}",
+  "expression_defaults": "{\"version\":1,\"id\":\"00000004-0000-4000-8000-000000000000\",\"type\":\"robot.command\",\"command\":\"expression.set\",\"payload\":{\"emotion\":\"happy\",\"intensity\":1.0}}",
+  "speak": "{\"version\":1,\"id\":\"00000005-0000-4000-8000-000000000000\",\"type\":\"robot.command\",\"command\":\"speaker.play\",\"payload\":{\"text\":\"Hello there.\",\"emotion\":\"happy\"}}",
+  "speak_no_emotion": "{\"version\":1,\"id\":\"00000006-0000-4000-8000-000000000000\",\"type\":\"robot.command\",\"command\":\"speaker.play\",\"payload\":{\"text\":\"Just this.\",\"emotion\":null}}",
+  "sleep": "{\"version\":1,\"id\":\"00000007-0000-4000-8000-000000000000\",\"type\":\"robot.command\",\"command\":\"device.sleep\",\"payload\":{\"duration_seconds\":300}}",
+  "restart": "{\"version\":1,\"id\":\"00000008-0000-4000-8000-000000000000\",\"type\":\"robot.command\",\"command\":\"device.restart\",\"payload\":{}}",
+  "ack": "{\"version\":1,\"id\":\"00000009-0000-4000-8000-000000000000\",\"type\":\"ack\",\"ref\":\"00000001-0000-4000-8000-000000000000\"}",
+  "error": "{\"version\":1,\"id\":\"0000000a-0000-4000-8000-000000000000\",\"type\":\"error\",\"ref\":\"00000001-0000-4000-8000-000000000000\",\"code\":\"bad_frame\",\"message\":\"nope\"}"
+}

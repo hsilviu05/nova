@@ -124,6 +124,34 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  protocol-contract:
+    name: Protocol contract
+    runs-on: ubuntu-latest
+    # The device protocol has two implementations of one wire format --
+    # Pydantic models and C++ -- and nothing but this stops them drifting.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/api/pyproject.toml
+
+      - name: Install
+        working-directory: services/api
+        run: pip install -e ".[dev]"
+
+      - name: Validate firmware frames against the server schema
+        working-directory: .
+        run: python scripts/check_protocol_contract.py
+
+      - name: Fail if the fixtures were stale
+        working-directory: .
+        # The check regenerates them; a diff means the committed copies no
+        # longer match what the server produces.
+        run: git diff --exit-code firmware/test/fixtures
+
   ios-contract:
     name: iOS contract
     runs-on: ubuntu-latest
