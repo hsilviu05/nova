@@ -248,6 +248,43 @@ class TestDischargeSegment:
         ]
         assert len(current_discharge_segment(samples)) == 3
 
+    def test_a_gradual_charge_starts_a_new_segment(self) -> None:
+        """A charge sampled densely never jumps, and must still be detected.
+
+        This is what a real device produces. The firmware heartbeats every 30
+        seconds, so a 15%/hour charge climbs 0.125% per sample -- comparing
+        each reading against the one before it sees a rise of at most one
+        point and concludes the battery is not charging.
+
+        The consequence was not a wrong number. The fit ran across the rise
+        and the fall together, R² collapsed, the gate refused to publish, and
+        the battery projection silently stopped existing on any device that
+        had ever been plugged in.
+        """
+        samples: list[tuple[datetime, int]] = []
+        # 40% -> 100% over four hours, sampled every 30 seconds.
+        for n in range(481):
+            samples.append((START + timedelta(seconds=30 * n), round(40 + 60 * n / 480)))
+        # Then eight hours of discharge at 6%/hour.
+        charged_at = START + timedelta(hours=4)
+        for n in range(1, 961):
+            samples.append((charged_at + timedelta(seconds=30 * n), round(100 - 6 * n / 120)))
+
+        segment = current_discharge_segment(samples)
+
+        # The segment must be the discharge, not the whole series.
+        assert len(segment) < len(samples)
+        assert segment[0][1] >= 97, "should start at or near the top of the charge"
+        assert segment[-1] == samples[-1]
+        assert segment[0][1] > segment[-1][1]
+
+    def test_a_slow_charge_is_not_mistaken_for_noise(self) -> None:
+        # Half-hourly readings climbing two points at a time: within the
+        # neighbour-to-neighbour tolerance at every step, but unmistakably a
+        # charge across the series.
+        samples = [(START + timedelta(minutes=30 * n), 50 + 2 * n) for n in range(8)]
+        assert len(current_discharge_segment(samples)) < len(samples)
+
     def test_empty(self) -> None:
         assert current_discharge_segment([]) == []
 

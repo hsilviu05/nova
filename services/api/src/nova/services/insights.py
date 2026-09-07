@@ -387,19 +387,38 @@ def current_discharge_segment(
 ) -> list[tuple[datetime, int]]:
     """The readings since the battery last stopped rising.
 
-    A rise beyond :data:`CHARGE_TOLERANCE_PERCENT` is treated as a charge and
-    starts a new segment; smaller rises are gauge noise and are kept, because
-    splitting on every wobble would leave segments too short to fit.
+    A rise beyond :data:`CHARGE_TOLERANCE_PERCENT` **above the segment's
+    lowest reading** starts a new segment; smaller rises are gauge noise and
+    are kept, because splitting on every wobble would leave segments too
+    short to fit.
+
+    Measured against the running minimum rather than against the previous
+    sample, and the difference is not academic. Comparing neighbours only
+    catches a charge that arrives as a jump, which is an artefact of sampling
+    slowly. A device heartbeating every 30 seconds sees a 15%/hour charge as
+    0.125% per sample -- a rise of at most one point, forever under any sane
+    tolerance. The charge is then never detected, the fit runs across a rise
+    and a fall, and the R² gate rejects the result: the projection stops
+    appearing at all, and nothing says why. That is what the firmware's own
+    heartbeat interval produces, so it was not a hypothetical.
+
+    Against the running minimum the same charge crosses the tolerance after
+    about 3% of climb, however often it was sampled.
     """
     if not samples:
         return []
 
     segment: list[tuple[datetime, int]] = [samples[0]]
-    for previous, current in itertools.pairwise(samples):
-        if current[1] - previous[1] > CHARGE_TOLERANCE_PERCENT:
+    floor = samples[0][1]
+
+    for _, current in itertools.pairwise(samples):
+        if current[1] - floor > CHARGE_TOLERANCE_PERCENT:
+            # Climbing away from the trough: a charge, not a wobble.
             segment = [current]
+            floor = current[1]
         else:
             segment.append(current)
+            floor = min(floor, current[1])
     return segment
 
 

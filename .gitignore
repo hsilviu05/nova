@@ -79,3 +79,13 @@ firmware/build/
 # ESP-IDF managed dependencies, fetched by idf.py.
 firmware/managed_components/
 firmware/dependencies.lock
+
+# Xcode. NOVA.xcodeproj is GENERATED from apps/ios/project.yml by XcodeGen --
+# committing it would reintroduce the merge conflicts that spec exists to
+# avoid. Run `xcodegen generate` after cloning.
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+DerivedData/
+*.xcuserstate
+.swiftpm/
