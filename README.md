@@ -11,11 +11,13 @@ platform**: weeks of real telemetry from a real device, feeding a real
 machine-learning pipeline that predicts when its owner will next interact
 with it.
 
-> **Status: Phases 1–4 of 10.** The backend — API, persistence, auth, the
-> device platform, and conversational AI — is built, tested, and running. The
-> iOS client is written but has never been compiled (see below). The firmware,
-> semantic memory, and ML pipeline are scheduled phases, not promises already
-> kept. See [Roadmap](#roadmap) for exactly what exists today.
+> **Status: Phases 1–8 of 10, unevenly.** The backend — API, persistence,
+> auth, the device platform, conversational AI, semantic memory, analytics,
+> and the ML pipeline — is built, tested, and running. The firmware's core is
+> tested on a host; its device layer has never been compiled and nothing has
+> run on hardware. The iOS client is written but has never been compiled. The
+> ML pipeline has trained nothing, by rule: no synthetic data, and there is no
+> device yet. See [Roadmap](#roadmap) for exactly what exists today.
 
 ---
 
@@ -331,7 +333,7 @@ nova/
 ├── apps/ios/               Native SwiftUI client             (Phase 3)
 ├── services/api/           FastAPI backend                   ✅ Phase 1
 ├── firmware/nova-esp32/    ESP-IDF firmware, C++             (Phase 2/6)
-├── ml/                     Data, features, training, models  (Phase 8)
+├── ml/                     Dataset, features, training, registry ✅ Phase 8
 ├── hardware/               CAD, electronics, assembly        (Phase 6)
 ├── infrastructure/         Docker and deployment
 ├── docs/
@@ -373,9 +375,9 @@ being unreachable.
 | **3** | iOS foundation: SwiftUI app, auth, device claiming, home screen | ⚠️ **Written, not compiled** |
 | **4** | AI chat: provider abstraction, conversations, streaming | ✅ **Backend complete**, iOS uncompiled |
 | **5** | Semantic memory: extraction, embeddings, pgvector retrieval | ✅ **Backend complete**, iOS uncompiled |
-| **6** | Physical robot: servos, animated AMOLED face, audio, proximity, IMU | ⏳ **Behaviour core done and tested**; drivers and ESP-IDF layer next |
+| **6** | Physical robot: servos, animated AMOLED face, audio, proximity, IMU | ⏳ **Core, drivers, face and ESP-IDF layer written**; the core is tested, the device layer is uncompiled, and nothing has run on hardware |
 | **7** | Telemetry and analytics: aggregation, insights screen | ✅ **Backend complete**, iOS uncompiled |
-| 8 | Machine learning: dataset, features, temporal validation, predictions | Planned |
+| **8** | Machine learning: dataset, features, temporal validation, predictions | ✅ **Pipeline complete and tested**; trains nothing until real telemetry exists |
 | 9 | GitHub dev mode: webhooks, CI reactions | Planned |
 | 10 | Production hardening: security review, performance, deployment | Planned |
 
