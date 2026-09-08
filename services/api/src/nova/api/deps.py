@@ -31,6 +31,7 @@ from nova.repositories.device import (
     DeviceRepository,
     DeviceTelemetryRepository,
 )
+from nova.repositories.github_integration import GitHubIntegrationRepository
 from nova.repositories.memory import MemoryRepository
 from nova.repositories.refresh_token import RefreshTokenRepository
 from nova.repositories.user import UserRepository
@@ -39,6 +40,7 @@ from nova.services.auth import AuthService
 from nova.services.connections import ConnectionRegistry
 from nova.services.conversation import ChatStreamer, ConversationService
 from nova.services.device import DeviceService
+from nova.services.github_integration import GitHubIntegrationService
 from nova.services.health import HealthService
 from nova.services.memory import MemoryExtractor, MemoryRecorder, MemoryService
 from nova.services.provisioning import ProvisioningService
@@ -187,6 +189,30 @@ def get_device_service(
         credentials=credentials,
         telemetry=telemetry,
         connections=connections,
+    )
+
+
+# -- GitHub dev mode ------------------------------------------------------------
+
+
+def get_github_integration_repository(session: SessionDep) -> GitHubIntegrationRepository:
+    return GitHubIntegrationRepository(session)
+
+
+def get_github_integration_service(
+    request: Request,
+    integrations: Annotated[
+        GitHubIntegrationRepository, Depends(get_github_integration_repository)
+    ],
+    devices: Annotated[DeviceRepository, Depends(get_device_repository)],
+    connections: Annotated[ConnectionRegistry, Depends(get_connection_registry)],
+) -> GitHubIntegrationService:
+    return GitHubIntegrationService(
+        integrations=integrations,
+        devices=devices,
+        connections=connections,
+        redis=get_redis(request),
+        settings=get_app_settings(request),
     )
 
 

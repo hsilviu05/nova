@@ -208,6 +208,11 @@ class Settings(BaseSettings):
 
     environment: Environment = "local"
     debug: bool = False
+    # Where this API is reachable from the internet, e.g. https://nova.example.
+    # Only GitHub dev mode needs it: a webhook URL has to be absolute, and
+    # the server cannot know its own public name from inside a container.
+    # Unset, the integration hands back a path and says so.
+    public_base_url: str | None = None
     api_v1_prefix: str = "/api/v1"
 
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)

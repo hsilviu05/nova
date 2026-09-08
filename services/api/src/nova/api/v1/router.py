@@ -10,6 +10,7 @@ from nova.api.v1 import (
     conversations,
     device_ws,
     devices,
+    integrations,
     memories,
     users,
 )
@@ -23,6 +24,7 @@ router.include_router(devices.router)
 router.include_router(analytics.router)
 router.include_router(conversations.router)
 router.include_router(memories.router)
+router.include_router(integrations.router)
 # The device socket lives under the same version prefix as the REST routes it
 # shares a protocol version with.
 router.include_router(device_ws.router)
