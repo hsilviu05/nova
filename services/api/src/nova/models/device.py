@@ -202,13 +202,17 @@ class DeviceTelemetry(Base, UUIDPrimaryKeyMixin):
 
     __tablename__ = "device_telemetry"
 
+    # Neither column carries its own index. Every query that touches this
+    # table is scoped to one device, so the composite indexes below cover
+    # both, and a lone event_type index turned out to be actively harmful:
+    # on a few million rows the planner AND-ed it into device-scoped
+    # aggregates and spent most of each query walking it (docs/performance.md).
     device_id: Mapped[uuid.UUID] = mapped_column(
         PgUUID(as_uuid=True),
         ForeignKey("devices.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    event_type: Mapped[str] = mapped_column(String(48), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(48), nullable=False)
 
     # The device's own clock, which is what the ML pipeline treats as the
     # event time. Kept separate from arrival time so a queued batch uploaded
@@ -232,8 +236,16 @@ class DeviceTelemetry(Base, UUIDPrimaryKeyMixin):
     )
 
     __table_args__ = (
-        # Every analytics query is "this device, most recent first".
+        # Every analytics query is "this device, most recent first"...
         Index("ix_device_telemetry_device_id_recorded_at", "device_id", "recorded_at"),
+        # ...and the hourly, daily and heartbeat-gap ones are "this device,
+        # this kind of event, most recent first". Index-only for all three.
+        Index(
+            "ix_device_telemetry_device_id_event_type_recorded_at",
+            "device_id",
+            "event_type",
+            "recorded_at",
+        ),
         CheckConstraint(
             "battery_percent IS NULL OR (battery_percent BETWEEN 0 AND 100)",
             name="battery_percent_range",
