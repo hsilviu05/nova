@@ -12,6 +12,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from nova import __version__
 from nova.ai.registry import build_chat_provider, build_embedding_provider
@@ -23,6 +24,7 @@ from nova.core.security import Argon2PasswordHasher, TokenService
 from nova.db.redis import create_redis
 from nova.db.session import create_engine, create_session_factory
 from nova.middleware.errors import register_exception_handlers
+from nova.middleware.hardening import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from nova.middleware.request_context import RequestContextMiddleware
 from nova.services.connections import InMemoryConnectionRegistry
 
@@ -93,9 +95,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
 
-    # Order matters: CORS is added last so it runs first and can answer a
-    # preflight before anything else touches the request.
+    # Order matters: middleware added later runs earlier. The body cap goes
+    # innermost so that its refusal is raised from inside the endpoint's own
+    # read of the body, where the exception handlers turn it into the
+    # standard 413 envelope. One layer further out and Starlette's
+    # BaseHTTPMiddleware would re-raise it from its streaming task instead.
+    # Then the request id, the security headers on the way out, the Host
+    # check, and CORS outermost so it can answer a preflight before anything
+    # else touches the request.
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.security.max_request_body_bytes)
     app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
+    if settings.security.allowed_hosts != ["*"]:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.security.allowed_hosts)
     if settings.security.cors_origins:
         app.add_middleware(
             CORSMiddleware,

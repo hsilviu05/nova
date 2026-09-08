@@ -13,7 +13,7 @@ from __future__ import annotations
 import functools
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["local", "test", "staging", "production"]
@@ -84,6 +84,13 @@ class SecuritySettings(BaseModel):
 
     cors_origins: list[str] = Field(default_factory=list)
     cors_allow_credentials: bool = True
+    # Host header allowlist. "*" accepts anything, which is right for local
+    # work and wrong in production, where a request for a host this API does
+    # not serve is either a misrouted proxy or a cache-poisoning attempt.
+    allowed_hosts: list[str] = Field(default_factory=lambda: ["*"])
+    # Cap on any request body. Chat messages and telemetry pages are
+    # kilobytes; the webhook has its own, tighter limit.
+    max_request_body_bytes: int = Field(default=1024 * 1024, ge=1024)
 
     # Fixed-window limits applied to unauthenticated auth endpoints.
     auth_rate_limit_attempts: int = Field(default=10, ge=1)
@@ -191,6 +198,15 @@ class ObservabilitySettings(BaseModel):
     log_json: bool = True
 
 
+# Secrets that appear in this repository and must never reach production.
+_PLACEHOLDER_SECRETS = frozenset(
+    {
+        "ci-secret-key-at-least-thirty-two-characters-long",
+        "x" * 40,
+    }
+)
+
+
 class Settings(BaseSettings):
     """Root settings object, resolved once per process."""
 
@@ -226,6 +242,40 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @model_validator(mode="after")
+    def _refuse_unsafe_production(self) -> Settings:
+        """Refuse to start in production with settings that only make sense
+        on a laptop.
+
+        Each of these is a real way a deployment gets quietly worse than it
+        looks: debug tracebacks, a CORS wildcard, a Host allowlist that
+        accepts anything, a webhook URL that is not HTTPS, SQL echoed into
+        the logs, or the secret every CI run uses. Refusing to boot is the
+        only failure loud enough to be noticed before the first request.
+        """
+        if not self.is_production:
+            return self
+
+        problems: list[str] = []
+        if self.debug:
+            problems.append("NOVA_DEBUG must be false")
+        if "*" in self.security.cors_origins:
+            problems.append("NOVA_SECURITY__CORS_ORIGINS must not contain '*'")
+        if "*" in self.security.allowed_hosts:
+            problems.append("NOVA_SECURITY__ALLOWED_HOSTS must name the public host, not '*'")
+        if self.public_base_url and not self.public_base_url.startswith("https://"):
+            problems.append("NOVA_PUBLIC_BASE_URL must be https://")
+        if self.database.echo:
+            problems.append("NOVA_DATABASE__ECHO must be false")
+        if self.jwt.secret_key.get_secret_value() in _PLACEHOLDER_SECRETS:
+            problems.append("NOVA_JWT__SECRET_KEY is a placeholder")
+        if not self.observability.log_json:
+            problems.append("NOVA_OBSERVABILITY__LOG_JSON should be true for log shipping")
+
+        if problems:
+            raise ValueError("refusing to start in production: " + "; ".join(problems))
+        return self
 
     @property
     def docs_url(self) -> str | None:
