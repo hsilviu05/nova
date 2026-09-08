@@ -378,7 +378,7 @@ being unreachable.
 | **6** | Physical robot: servos, animated AMOLED face, audio, proximity, IMU | ⏳ **Core, drivers, face and ESP-IDF layer written**; the core is tested, the device layer is uncompiled, and nothing has run on hardware |
 | **7** | Telemetry and analytics: aggregation, insights screen | ✅ **Backend complete**, iOS uncompiled |
 | **8** | Machine learning: dataset, features, temporal validation, predictions | ✅ **Pipeline complete and tested**; trains nothing until real telemetry exists |
-| 9 | GitHub dev mode: webhooks, CI reactions | Planned |
+| **9** | GitHub dev mode: webhooks, CI reactions | ✅ **Backend complete** — signed webhook, replay-safe, reacts on the desk; iOS uncompiled |
 | 10 | Production hardening: security review, performance, deployment | Planned |
 
 Each phase ends with something that runs, not something that compiles.
