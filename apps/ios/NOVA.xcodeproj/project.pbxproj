@@ -140,11 +140,13 @@
 				E6FD6349D9702CFA91E165F9 /* InsightsView.swift */,
 				6E7F579DCDF5EFEC6CC9E179 /* MemoryModel.swift */,
 				2140F8AB3B53527D75973D79 /* MemoryView.swift */,
+				F0CC2EB0D609D62E68B3EB60 /* GitHubIntegrationView.swift */,
 				5ED88827871EAADF6B034B3F /* SettingsView.swift */,
 				1F710030314719B05DF31BF6 /* TimezonePicker.swift */,
 				3B23C6CDA7E31A4E1C1C73D5 /* Analytics.swift */,
 				B7A927D9C15D21EAAA912500 /* Conversation.swift */,
 				F2DB91F03CC2F083D695B561 /* Device.swift */,
+				CB2AE31BA3CAC7BAE79A0C0E /* GitHubIntegration.swift */,
 				767F9C33C228175DEA3D7EF5 /* JSONValue.swift */,
 				47FBB3C4070E908F8D57D085 /* Memory.swift */,
 				D1C813FE3AE88B87C7AB2AC5 /* Session.swift */,
@@ -236,6 +238,13 @@
 			);
 			name = NOVATests;
 			sourceTree = "<group>";
+		};
+		46FC1E0B680B9846F9638198 /* GitHubIntegrationView.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			name = GitHubIntegrationView.swift;
+			path = "NOVA/Features/Settings/GitHubIntegrationView.swift";
+			sourceTree = SOURCE_ROOT;
 		};
 		47A587A7A738D97763822554 /* InsightsModel.swift */ = {
 			isa = PBXFileReference;
@@ -445,12 +454,14 @@
 				5F4096C40CB86982B9D9F52F /* InsightsView.swift */,
 				D0A2364E93E4A49B65CA60B8 /* MemoryModel.swift */,
 				A1EDDF17FACEDD1155456F49 /* MemoryView.swift */,
+				46FC1E0B680B9846F9638198 /* GitHubIntegrationView.swift */,
 				42331D4B61F1C83AFB62D9F1 /* SettingsView.swift */,
 				9745BF88FB6363A074C7C0D0 /* TimezonePicker.swift */,
 				6552733D6F62FA438FA3CA81 /* Info.plist */,
 				9330E4702A2602CB88F4684B /* Analytics.swift */,
 				D075D8CD7A3959A40712397A /* Conversation.swift */,
 				2668E0A7A0E6FEAD3486B01F /* Device.swift */,
+				F9A0B983BE87C4637CD3270D /* GitHubIntegration.swift */,
 				19EAABECDAC3FA568DEFD7BD /* JSONValue.swift */,
 				380F5D17E300EAE20709565E /* Memory.swift */,
 				EE83C9584E3104071D337E1E /* Session.swift */,
@@ -613,6 +624,10 @@
 			path = "NOVA/Core/SessionStore.swift";
 			sourceTree = SOURCE_ROOT;
 		};
+		CB2AE31BA3CAC7BAE79A0C0E /* GitHubIntegration.swift in NOVA */ = {
+			isa = PBXBuildFile;
+			fileRef = F9A0B983BE87C4637CD3270D /* GitHubIntegration.swift */;
+		};
 		CD31AECD6E8B9524B25C1198 /* RootView.swift in NOVA */ = {
 			isa = PBXBuildFile;
 			fileRef = C5A1ED830B412A2102BBED1A /* RootView.swift */;
@@ -710,6 +725,10 @@
 			path = "NOVA/Models/Session.swift";
 			sourceTree = SOURCE_ROOT;
 		};
+		F0CC2EB0D609D62E68B3EB60 /* GitHubIntegrationView.swift in NOVA */ = {
+			isa = PBXBuildFile;
+			fileRef = 46FC1E0B680B9846F9638198 /* GitHubIntegrationView.swift */;
+		};
 		F0FF9B9019157749226881D9 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -735,6 +754,13 @@
 		F7665C6F4CDD63F816CFFAB5 /* SignInView.swift in NOVA */ = {
 			isa = PBXBuildFile;
 			fileRef = 1BF9172EC3CE26CE26B5315F /* SignInView.swift */;
+		};
+		F9A0B983BE87C4637CD3270D /* GitHubIntegration.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			name = GitHubIntegration.swift;
+			path = "NOVA/Models/GitHubIntegration.swift";
+			sourceTree = SOURCE_ROOT;
 		};
 		FA646950B39339639E991AA6 /* Debug (NOVA) */ = {
 			isa = XCBuildConfiguration;

@@ -46,6 +46,16 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    NavigationLink {
+                        GitHubIntegrationView()
+                    } label: {
+                        Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
+                } footer: {
+                    Text("Let NOVA react on the desk when your builds finish.")
+                }
+
+                Section {
                     Button("Sign Out", role: .destructive) { isSigningOut = true }
                 }
 

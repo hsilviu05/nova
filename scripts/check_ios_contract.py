@@ -47,6 +47,8 @@ MODELS = {
     "BatteryPoint": "BatteryPoint",
     "EventTypeBucket": "EventTypeBucket",
     "Gap": "GapRead",
+    "GitHubIntegration": "GitHubIntegrationRead",
+    "GitHubIntegrationCreated": "GitHubIntegrationCreated",
 }
 
 
