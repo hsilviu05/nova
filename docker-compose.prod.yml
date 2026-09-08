@@ -1,0 +1,180 @@
+# NOVA production stack: one host, one domain, TLS from Let's Encrypt.
+#
+#   cp deploy/env.production.example .env   # then fill it in
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# What is different from the development stack, and why:
+#
+#   * Nothing but Caddy publishes a port. Postgres, Redis and the API are
+#     reachable only on the private compose network. The development file
+#     publishes them on loopback for psql and the debugger; here there is
+#     no reason to, and an unpublished port is one that cannot be
+#     misconfigured onto the internet.
+#   * The API runs with NOVA_ENVIRONMENT=production, which makes the
+#     settings layer refuse to boot with a wildcard Host list, a CORS
+#     wildcard, debug on, a placeholder JWT secret or a non-HTTPS public
+#     URL. A wrong .env fails at start, with the reason in the log, rather
+#     than at the first request.
+#   * uvicorn trusts X-Forwarded-* headers. The rate limiter keys on the
+#     client address, and behind a proxy that address is the proxy's unless
+#     the forwarded headers are honoured -- every client would share one
+#     bucket. It trusts them from any peer because the only peer that can
+#     reach the port is Caddy; there is no published port to spoof through.
+#   * Postgres is dumped nightly to a volume, and the dumps are pruned after
+#     fourteen days. A backup that has never been restored is a hope, not a
+#     backup: docs/deployment.md has the restore drill.
+#
+# Tested locally with NOVA_DOMAIN=localhost, for which Caddy issues a
+# certificate from its own CA. It has not been run against a public domain
+# with a real Let's Encrypt issuance -- that needs a host with ports 80 and
+# 443 on the internet, which the development machine is not.
+
+name: nova-prod
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: nova-caddy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      NOVA_DOMAIN: ${NOVA_DOMAIN:?set NOVA_DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - nova-caddy-data:/data
+      - nova-caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  api:
+    image: ${NOVA_API_IMAGE:-ghcr.io/hsilviu05/nova-api}:${NOVA_API_TAG:-latest}
+    container_name: nova-api
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NOVA_ENVIRONMENT: production
+      NOVA_DEBUG: "false"
+      NOVA_PUBLIC_BASE_URL: https://${NOVA_DOMAIN}
+      NOVA_DATABASE__HOST: postgres
+      NOVA_DATABASE__PORT: 5432
+      NOVA_DATABASE__USER: ${NOVA_DATABASE__USER:-nova}
+      NOVA_DATABASE__PASSWORD: ${NOVA_DATABASE__PASSWORD:?set NOVA_DATABASE__PASSWORD in .env}
+      NOVA_DATABASE__NAME: ${NOVA_DATABASE__NAME:-nova}
+      NOVA_REDIS__HOST: redis
+      NOVA_REDIS__PORT: 6379
+      NOVA_JWT__SECRET_KEY: ${NOVA_JWT__SECRET_KEY:?set NOVA_JWT__SECRET_KEY in .env}
+      NOVA_SECURITY__ALLOWED_HOSTS: '["${NOVA_DOMAIN}"]'
+      NOVA_SECURITY__CORS_ORIGINS: ${NOVA_SECURITY__CORS_ORIGINS:-[]}
+      NOVA_OBSERVABILITY__LOG_LEVEL: ${NOVA_OBSERVABILITY__LOG_LEVEL:-INFO}
+      NOVA_OBSERVABILITY__LOG_JSON: "true"
+      NOVA_AI__CHAT_PROVIDER: ${NOVA_AI__CHAT_PROVIDER:-offline}
+      NOVA_AI__CHAT_MODEL: ${NOVA_AI__CHAT_MODEL:-claude-opus-5}
+      NOVA_AI__ANTHROPIC_API_KEY: ${NOVA_AI__ANTHROPIC_API_KEY:-}
+      NOVA_AI__OLLAMA_BASE_URL: ${NOVA_AI__OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      NOVA_AI__OLLAMA_MODEL: ${NOVA_AI__OLLAMA_MODEL:-qwen2.5:7b}
+      NOVA_AI__OLLAMA_KEEP_ALIVE: ${NOVA_AI__OLLAMA_KEEP_ALIVE:-30m}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # No published port: see the header.
+    expose:
+      - "8000"
+    # The image's own health check asks for http://localhost:8000/health,
+    # and in production the Host allowlist refuses "localhost". Same probe,
+    # with the Host the API is configured to answer to.
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "-H", "Host: ${NOVA_DOMAIN}", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn nova.main:create_app --factory
+               --host 0.0.0.0 --port 8000
+               --workers ${NOVA_API_WORKERS:-2}
+               --proxy-headers --forwarded-allow-ips='*'
+               --no-server-header"
+    logging: *logging
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: nova-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${NOVA_DATABASE__USER:-nova}
+      POSTGRES_PASSWORD: ${NOVA_DATABASE__PASSWORD:?set NOVA_DATABASE__PASSWORD in .env}
+      POSTGRES_DB: ${NOVA_DATABASE__NAME:-nova}
+      POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=en-US"
+    volumes:
+      - nova-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NOVA_DATABASE__USER:-nova} -d ${NOVA_DATABASE__NAME:-nova}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *logging
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: nova-redis
+    restart: always
+    # Rate-limit counters and dedupe keys only; nothing worth persisting.
+    # maxmemory with an eviction policy so a flood of keys degrades to
+    # forgotten counters rather than a stopped Redis.
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 64mb
+      - --maxmemory-policy
+      - allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+
+  backup:
+    # Same image as the server so pg_dump is never a major version behind
+    # the Postgres it talks to.
+    image: pgvector/pgvector:pg17
+    container_name: nova-backup
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${NOVA_DATABASE__USER:-nova}
+      PGPASSWORD: ${NOVA_DATABASE__PASSWORD:?set NOVA_DATABASE__PASSWORD in .env}
+      PGDATABASE: ${NOVA_DATABASE__NAME:-nova}
+      NOVA_BACKUP_KEEP_DAYS: ${NOVA_BACKUP_KEEP_DAYS:-14}
+      NOVA_BACKUP_INTERVAL_SECONDS: ${NOVA_BACKUP_INTERVAL_SECONDS:-86400}
+    volumes:
+      - nova-backups:/backups
+      - ./deploy/backup.sh:/usr/local/bin/nova-backup:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/nova-backup"]
+    logging: *logging
+
+volumes:
+  nova-pgdata:
+  nova-backups:
+  nova-caddy-data:
+  nova-caddy-config:
