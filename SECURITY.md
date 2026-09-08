@@ -130,6 +130,16 @@ enumerated rather than wildcarded.
 The API image runs as a non-root user (uid 10001). The build toolchain lives
 in a separate builder stage and never reaches the runtime image.
 
+### Production guardrails
+
+In production the settings layer refuses to start with debug on, a CORS or
+Host wildcard, a non-HTTPS public URL, SQL echo, JSON logging off, or the
+placeholder JWT secret from CI. Every response carries `Cache-Control:
+no-store`, `nosniff`, `X-Frame-Options: DENY`, a no-referrer policy and a
+denying `Permissions-Policy`; HSTS is added only on requests that arrived
+over HTTPS. Request bodies are capped at 1 MiB. The details and the
+verification are in [docs/security-review.md](docs/security-review.md).
+
 ### Device credentials
 
 A device is bound to an account by the claim flow in
@@ -253,5 +263,7 @@ removed.
   strict schema validation on every frame.
 - **Webhook verification** (Phase 9): GitHub signature validation with
   constant-time comparison.
-- **Security review** (Phase 10): dependency audit, penetration testing pass,
-  formal threat-model review.
+- **Security review** (Phase 10): done as a self-review, with findings,
+  fixes and what was left undone in
+  [docs/security-review.md](docs/security-review.md). No external
+  penetration test has been made.

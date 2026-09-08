@@ -379,7 +379,7 @@ being unreachable.
 | **7** | Telemetry and analytics: aggregation, insights screen | ✅ **Backend complete**, iOS uncompiled |
 | **8** | Machine learning: dataset, features, temporal validation, predictions | ✅ **Pipeline complete and tested**; trains nothing until real telemetry exists |
 | **9** | GitHub dev mode: webhooks, CI reactions | ✅ **Backend complete** — signed webhook, replay-safe, reacts on the desk; iOS uncompiled |
-| 10 | Production hardening: security review, performance, deployment | Planned |
+| **10** | Production hardening: security review, performance, deployment | ✅ **Complete** — reviewed and fixed, measured before and after, single-host compose with TLS and backups; the stack has not yet run on a public host |
 
 Each phase ends with something that runs, not something that compiles.
 
@@ -391,6 +391,9 @@ Each phase ends with something that runs, not something that compiles.
 | [SECURITY.md](SECURITY.md) | Threat model, auth design, privacy posture |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Local setup, migrations, testing, troubleshooting |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Commit conventions, code standards, review |
+| [docs/security-review.md](docs/security-review.md) | Findings, severity, what was fixed and what was not done |
+| [docs/performance.md](docs/performance.md) | What was measured, before and after |
+| [docs/deployment.md](docs/deployment.md) | Single-host production: TLS, release images, backups, restore drill |
 | [docs/decisions/](docs/decisions/) | Architecture Decision Records |
 
 ## License

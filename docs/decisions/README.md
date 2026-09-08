@@ -21,6 +21,7 @@ built, but the reasoning disappears unless it is written down.
 | [013](013-ml-pipeline-guarantees.md) | The ML pipeline's guarantees are code, not conventions | Accepted |
 | [014](014-local-llm-via-ollama.md) | A local model through Ollama, natively on the host | Accepted |
 | [015](015-github-dev-mode.md) | GitHub dev mode: a public webhook, and what it may and may not do | Accepted |
+| [016](016-production-posture.md) | Production posture: refuse to boot, one host, nothing published but the edge | Accepted |
 
 Format: Context, Decision, Alternatives considered, Consequences.
 

@@ -5,6 +5,7 @@
 | `check.sh` | Runs lint, format, types, tests, and migration drift — everything CI runs. |
 | `simulate_device.py` | Drives the whole device lifecycle against a running API, standing in for hardware that has not arrived yet. |
 | `check_ios_contract.py` | Compares the Swift models against the API's OpenAPI schema. |
+| `loadcheck.py` | Twenty simulated users against a running API; p50/p95/p99 per endpoint. Refuses to run outside a local or test environment. |
 
 `check.sh` needs the API virtualenv active and a reachable PostgreSQL and
 Redis (`docker compose up -d postgres redis`).
@@ -43,3 +44,22 @@ python scripts/check_ios_contract.py openapi.json       # against a saved spec
 
 Non-zero exit on a mismatch. It runs in CI against a schema exported without
 starting a server.
+
+## loadcheck.py
+
+Concurrency against a running API: each simulated user registers, claims
+a device, streams telemetry over the real WebSocket, chats through the
+offline provider and pulls analytics; the report is p50/p95/p99 per
+endpoint. It writes rows, so it refuses to run unless `/health` reports a
+`local` or `test` environment, and every row it writes is marked
+`synthetic`.
+
+```bash
+python scripts/loadcheck.py --users 20 --rounds 10
+```
+
+One machine playing twenty people trips the per-IP rate limits, which is
+those limits working. For a load run, raise them on the API you are
+testing; the script prints the variable names when it sees a 429. The
+numbers it produced, and what was changed because of them, are in
+[docs/performance.md](../docs/performance.md).
