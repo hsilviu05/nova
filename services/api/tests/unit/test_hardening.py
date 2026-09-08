@@ -3,10 +3,12 @@ guardrails."""
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+
 import pytest
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from nova.core.config import (
@@ -23,6 +25,10 @@ from nova.middleware.request_context import RequestContextMiddleware
 CAP = 1024
 
 
+class Payload(BaseModel):
+    text: str
+
+
 def make_app(*, allowed_hosts: list[str] | None = None) -> FastAPI:
     app = FastAPI()
 
@@ -33,6 +39,12 @@ def make_app(*, allowed_hosts: list[str] | None = None) -> FastAPI:
     @app.post("/echo")
     async def echo(request: Request) -> dict[str, int]:
         return {"bytes": len(await request.body())}
+
+    @app.post("/json")
+    async def json_endpoint(payload: Payload) -> dict[str, int]:
+        # A request model: FastAPI reads and parses the body itself, inside
+        # a catch-all that turns any failure into its own 400.
+        return {"size": len(payload.text)}
 
     @app.post("/ignore")
     async def ignore() -> dict[str, str]:
@@ -79,6 +91,33 @@ class TestSecurityHeaders:
 
 
 class TestBodyLimit:
+    async def test_a_route_with_a_request_model_gets_the_413_not_fastapis_400(self) -> None:
+        async with client(make_app()) as http:
+            response = await http.post("/json", json={"text": "x" * (CAP + 1)})
+        assert response.status_code == 413
+        body = response.json()
+        assert body["error"]["code"] == "payload_too_large"
+        assert body["error"]["request_id"] == response.headers["x-request-id"]
+
+    async def test_a_chunked_body_to_a_request_model_route_is_413(self) -> None:
+        async def chunks() -> AsyncIterator[bytes]:
+            yield b'{"text": "'
+            for _ in range(CAP // 8 + 1):
+                yield b"xxxxxxxx"
+            yield b'"}'
+
+        async with client(make_app()) as http:
+            response = await http.post(
+                "/json", content=chunks(), headers={"content-type": "application/json"}
+            )
+        assert response.status_code == 413
+
+    async def test_a_request_model_route_under_the_cap_is_untouched(self) -> None:
+        async with client(make_app()) as http:
+            response = await http.post("/json", json={"text": "x" * (CAP // 2)})
+        assert response.status_code == 200
+        assert response.json() == {"size": CAP // 2}
+
     async def test_under_the_cap_passes(self) -> None:
         async with client(make_app()) as c:
             response = await c.post("/echo", content=b"x" * CAP)

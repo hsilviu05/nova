@@ -33,7 +33,11 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, MutableMapping
 from typing import Any
 
+from fastapi.responses import JSONResponse
+
 from nova.core.errors import PayloadTooLargeError
+from nova.middleware.request_context import REQUEST_ID_HEADER
+from nova.schemas.common import ErrorDetail, ErrorResponse
 
 Scope = MutableMapping[str, Any]
 Message = MutableMapping[str, Any]
@@ -96,22 +100,58 @@ class BodySizeLimitMiddleware:
 
         declared = _content_length(scope)
         received = 0
+        responded = False
+
+        async def refuse() -> None:
+            # The refusal is sent from here rather than raised for a handler
+            # to render. FastAPI wraps its own body read in a catch-all that
+            # turns any failure into a 400 "error parsing the body", so an
+            # exception raised from ``receive`` never reaches the 413
+            # handler on a route with a request model -- which is every
+            # route that matters. Send the response, then raise to stop the
+            # app; whatever it sends after this is dropped below.
+            nonlocal responded
+            responded = True
+            await _too_large(scope)(scope, receive, send)
+            raise PayloadTooLargeError()
 
         async def limited_receive() -> Message:
             # Checked lazily, on the first read, so a request nobody reads the
-            # body of is not refused for a header alone -- and so the error
-            # surfaces inside the request, where the envelope has a request id.
+            # body of is not refused for a header alone.
             if declared is not None and declared > self.max_bytes:
-                raise PayloadTooLargeError()
+                await refuse()
             message = await receive()
             if message["type"] == "http.request":
                 nonlocal received
                 received += len(message.get("body", b""))
                 if received > self.max_bytes:
-                    raise PayloadTooLargeError()
+                    await refuse()
             return message
 
-        await self.app(scope, limited_receive, send)
+        async def guarded_send(message: Message) -> None:
+            if responded:
+                return
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, guarded_send)
+        except PayloadTooLargeError:
+            # Escaped the app without being turned into a response of its
+            # own; the refusal already went out.
+            if not responded:
+                raise
+
+
+def _too_large(scope: Scope) -> JSONResponse:
+    error = PayloadTooLargeError()
+    request_id = scope.get("state", {}).get("request_id")
+    body = ErrorResponse(
+        error=ErrorDetail(code=error.code, message=error.message, request_id=request_id, details={})
+    )
+    headers = {REQUEST_ID_HEADER: request_id} if request_id else None
+    return JSONResponse(
+        status_code=error.status_code, content=body.model_dump(mode="json"), headers=headers
+    )
 
 
 def _content_length(scope: Scope) -> int | None:
