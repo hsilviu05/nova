@@ -33,13 +33,14 @@ from nova.core.config import (
     RedisSettings,
     SecuritySettings,
     Settings,
+    ToolSettings,
 )
 from nova.core.security import Argon2PasswordHasher, TokenService
 from nova.db.base import Base
 from nova.db.redis import create_redis
 from nova.db.session import create_engine
 from nova.main import create_app
-from nova.services.connections import InMemoryConnectionRegistry
+from nova.tools.registry import KnowledgeDependencies, ToolRegistry, build_registry
 
 # Long enough to satisfy the 32-character minimum; test-only, never deployed.
 TEST_JWT_SECRET = "test-secret-key-for-nova-suite-do-not-use-in-production"
@@ -61,16 +62,16 @@ def build_test_app(
     engine: AsyncEngine,
     session_factory: async_sessionmaker[AsyncSession],
     redis: Redis,
-    connections: InMemoryConnectionRegistry | None = None,
     chat_provider: ChatProvider | None = None,
     embedding_provider: EmbeddingProvider | None = None,
+    tool_registry: ToolRegistry | None = None,
 ) -> FastAPI:
     """Build an app wired to test fixtures instead of its own lifespan.
 
     Every client fixture goes through here. When the application grows a new
     piece of ``app.state``, it is added once rather than in each fixture --
-    which is how a missing ``connections`` registry first showed up as three
-    identical failures.
+    which is how a missing registry first showed up as three identical
+    failures.
     """
     app = create_app(settings)
     app.state.settings = settings
@@ -79,11 +80,20 @@ def build_test_app(
     app.state.redis = redis
     app.state.token_service = TokenService(settings.jwt)
     app.state.password_hasher = Argon2PasswordHasher(settings.security)
-    app.state.connections = connections or InMemoryConnectionRegistry()
     # Offline by default, so the suite exercises the whole conversation path
-    # with no API key, no network, and no per-run cost.
+    # with no model server, no API key, no network, and no per-run cost.
+    embeddings = embedding_provider or build_embedding_provider(settings.ai)
     app.state.chat_provider = chat_provider or build_chat_provider(settings.ai)
-    app.state.embedding_provider = embedding_provider or build_embedding_provider(settings.ai)
+    app.state.embedding_provider = embeddings
+    app.state.tool_registry = tool_registry or build_registry(
+        tools=settings.tools,
+        integrations=settings.integrations,
+        knowledge=KnowledgeDependencies(
+            session_factory=session_factory,
+            embeddings=embeddings,
+            ai=settings.ai,
+        ),
+    )
     return app
 
 
@@ -113,6 +123,21 @@ def settings() -> Settings:
             auth_rate_limit_attempts=1000,
         ),
         observability=ObservabilitySettings(log_level="WARNING", log_json=True),
+        tools=ToolSettings(
+            # Nothing that shells out. The suite runs on CI machines where
+            # docker and git may or may not exist, and a test that passes
+            # only where a binary happens to be installed is not a test.
+            system_enabled=False,
+            docker_enabled=False,
+            git_enabled=False,
+            github_enabled=False,
+            projects_enabled=False,
+            memory_tools_enabled=True,
+            shell_enabled=False,
+            # High enough that ordinary tests never trip it; the rate-limit
+            # tests set their own.
+            tool_rate_limit=1000,
+        ),
     )
 
 
@@ -214,6 +239,23 @@ async def client(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://nova.test") as http_client:
         yield http_client
+
+
+@pytest.fixture
+def tool_registry(
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> ToolRegistry:
+    """The registry the default client is built with."""
+    return build_registry(
+        tools=settings.tools,
+        integrations=settings.integrations,
+        knowledge=KnowledgeDependencies(
+            session_factory=session_factory,
+            embeddings=build_embedding_provider(settings.ai),
+            ai=settings.ai,
+        ),
+    )
 
 
 @pytest.fixture

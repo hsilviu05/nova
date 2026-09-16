@@ -1,31 +1,41 @@
 import Foundation
 
 /// Where the API lives.
-struct APIConfiguration: Sendable {
+struct APIConfiguration: Sendable, Equatable {
     var baseURL: URL
     var timeout: TimeInterval = 20
 
     /// The simulator reaching a server on the development machine.
+    ///
+    /// Only useful in the simulator. On the phone `127.0.0.1` is the phone,
+    /// which is why `ServerSettings` exists and why the Settings screen says
+    /// so when this is still the configured address.
     static let localDevelopment = APIConfiguration(
         baseURL: URL(string: "http://127.0.0.1:8000")!
     )
 
-    var apiV1: URL { baseURL.appending(path: "api/v1") }
-
-    /// The device WebSocket, derived from `baseURL` so one setting configures
-    /// both and they cannot drift apart.
-    var deviceSocketURL: URL? {
-        guard var components = URLComponents(
-            url: baseURL.appending(path: "api/v1/devices/ws"),
-            resolvingAgainstBaseURL: false
-        ) else { return nil }
-
-        components.scheme = switch components.scheme {
-        case "https": "wss"
-        default: "ws"
+    /// The address this build ships with, before anyone changes it.
+    ///
+    /// A launch argument override exists so UI tests can point the app at a
+    /// stub without rebuilding.
+    static var buildDefault: URL {
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-nova-base-url"),
+           index + 1 < arguments.count,
+           let url = URL(string: arguments[index + 1]) {
+            return url
         }
-        return components.url
+
+        if let raw = Bundle.main.object(forInfoDictionaryKey: "NOVABaseURL") as? String,
+           !raw.isEmpty,
+           let url = URL(string: raw) {
+            return url
+        }
+
+        return localDevelopment.baseURL
     }
+
+    var apiV1: URL { baseURL.appending(path: "api/v1") }
 }
 
 /// One HTTP request to the API.
@@ -40,6 +50,9 @@ struct Request: Sendable {
     var body: (any Encodable & Sendable)?
     /// False only for the endpoints that run before there is a session.
     var requiresAuth: Bool = true
+    /// Overrides the client's default, for the few calls that legitimately
+    /// take longer — a tool that shells out, a dashboard that probes a model.
+    var timeout: TimeInterval?
 }
 
 /// Performs requests, attaching credentials and renewing them when needed.
@@ -70,6 +83,9 @@ actor APIClient {
         } else {
             let config = URLSessionConfiguration.ephemeral
             config.timeoutIntervalForRequest = configuration.timeout
+            // False, deliberately. A phone on a desk loses its Wi-Fi
+            // regularly, and "NOVA server unavailable" now is more useful
+            // than a spinner that resolves itself in ninety seconds.
             config.waitsForConnectivity = false
             self.session = URLSession(configuration: config)
         }
@@ -162,6 +178,9 @@ actor APIClient {
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = request.method.rawValue
         urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let timeout = request.timeout {
+            urlRequest.timeoutInterval = timeout
+        }
 
         if let body = request.body {
             urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")

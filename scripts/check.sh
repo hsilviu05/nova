@@ -25,5 +25,22 @@ pytest --cov=nova --cov-report=term-missing
 echo "── migrations match models ──────────────────────"
 alembic check
 
+echo "── iOS contract ─────────────────────────────────"
+# The Swift app cannot be compiled here, so this is what stands between a
+# schema change and a client that silently decodes the wrong thing. The
+# schema is exported from the app factory without binding a port.
+python - <<'PYEOF'
+import json
+
+from nova.core.config import JWTSettings, Settings
+from nova.main import create_app
+
+settings = Settings(environment="test", jwt=JWTSettings(secret_key="x" * 40))
+with open("openapi.json", "w") as handle:
+    json.dump(create_app(settings).openapi(), handle)
+PYEOF
+python ../../scripts/check_ios_contract.py openapi.json
+rm -f openapi.json
+
 echo
 echo "All checks passed."

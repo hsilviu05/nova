@@ -1,52 +1,29 @@
 # NOVA for iOS
 
-Native SwiftUI client. **Phase 3.**
+Native SwiftUI client. An old iPhone in a stand on the desk, talking to NOVA
+on the Mac beside it.
 
-> ### ⚠️ Not yet compiled
->
-> Every other part of NOVA was written and verified in a Linux container.
-> Swift cannot be. This code has **never been through a compiler** — there is
-> no Swift toolchain available in that environment, and SwiftUI does not build
-> on Linux regardless.
->
-> Expect to fix compile errors on the first build. What *is* verified is the
-> part most likely to be wrong silently: every model and every test fixture
-> here was written against JSON captured from a running NOVA API, not from
-> memory.
+The phone is a terminal, not a compute node. It authenticates, renders,
+streams, and listens; the model and every tool run on the machine under the
+desk. See [ADR 015](../../docs/decisions/015-iphone-terminal.md) for why.
 
 ## Running it
 
-`NOVA.xcodeproj` is committed, so this is the whole of it:
-
 ```bash
 cd apps/ios
+brew install xcodegen && xcodegen generate
 open NOVA.xcodeproj
 ```
 
-`project.yml` is still the source of truth. The project is generated from it,
-two ways, and both produce the same thing:
+`project.yml` is the source of truth. The `.xcodeproj` is generated, not
+committed as an editable artefact: it is large, it conflicts on almost every
+merge, and `project.yml` says the same thing in forty readable lines.
+Regenerate rather than resolving a conflict in it.
 
-```bash
-xcodegen generate                        # brew install xcodegen
-python3 tools/generate_xcodeproj.py      # no Swift toolchain needed
-```
-
-Regenerate rather than resolve a merge conflict in the project file. Both
-generators are deterministic for a given spec, so the output is stable and a
-diff shows real changes rather than churn.
-
-`tools/generate_xcodeproj.py` exists because NOVA is developed mostly in a
-Linux container where there is no Swift toolchain and therefore no XcodeGen.
-It understands only the subset of `project.yml` this project uses — two
-targets, Swift sources, one resource, build settings. It is not an XcodeGen
-replacement, and if the spec grows past what it handles it should be deleted
-rather than extended into a bad clone.
-
-> The generated project has been parsed back and checked — every source file
-> on disk is referenced, no reference dangles, both targets carry the right
-> product types and configurations, and the test target depends on the app.
-> It has **not** been opened in Xcode, because there is no Mac here. If it
-> refuses to open, `xcodegen generate` overwrites it and is authoritative.
+`tools/generate_xcodeproj.py` produces the same project without XcodeGen, for
+an environment that has no Swift toolchain at all. It understands only the
+subset of `project.yml` this project uses. If the spec outgrows it, delete it
+rather than extending it into a bad clone.
 
 The backend must be running:
 
@@ -54,14 +31,41 @@ The backend must be running:
 docker compose up            # from the repository root
 ```
 
-Debug builds point at `http://127.0.0.1:8000`, set in `project.yml` and
-reachable from the simulator. An ATS exception covers localhost only — there
-is deliberately no blanket `NSAllowsArbitraryLoads`, so a release build must
-use HTTPS.
+### Pointing it at your Mac
 
-No device to hand? `python scripts/simulate_device.py` runs a fake one that
-provisions, prints a claim code, and streams telemetry — enough to exercise
-the whole app.
+Debug builds default to `http://127.0.0.1:8000`, which works **in the
+simulator only**. On the phone, `127.0.0.1` is the phone.
+
+In the app: **Settings → NOVA server**, and enter the Mac's address on your
+network — `http://192.168.1.20:8000` or `http://your-mac.local:8000`. The
+Settings screen says so explicitly while the address is still loopback,
+because it is the first thing everyone gets wrong.
+
+Three things about local networking:
+
+- **ATS.** The app declares `NSAllowsLocalNetworking`, which permits cleartext
+  to private and link-local addresses and `.local` names. Not
+  `NSAllowsArbitraryLoads` — cleartext to the open internet stays blocked, and
+  `ServerSettings` refuses to *save* an `http://` address outside those
+  ranges rather than saving one that silently never connects.
+- **Permission.** iOS asks for local network access on the first attempt.
+  Denying it means the app cannot reach your Mac at all.
+- **Binding.** The API has to be on `0.0.0.0`, not `127.0.0.1`. Compose does
+  this already.
+
+Changing the address signs you out and rebuilds the networking stack: an
+account on one NOVA is not an account on another, and a token from one server
+rejected by the next is a confusing way to learn that.
+
+### On a desk
+
+**Settings → Display & Brightness → Auto-Lock → Never**, on the charger.
+
+The app does nothing to defeat the lock screen or to keep itself alive in the
+background — no background modes, no silent pushes, no keep-alive. The
+dashboard polls every fifteen seconds while it is on screen and stops when it
+is not, because a timer running in someone's pocket is a battery drain buying
+nothing anyone can see.
 
 ## Stack
 
@@ -69,35 +73,38 @@ the whole app.
 |---|---|
 | UI | SwiftUI |
 | State | Observation (`@Observable`) |
-| Concurrency | Swift 6.2, strict checking complete |
-| Networking | `URLSession` |
+| Concurrency | Swift 6, strict checking complete |
+| Networking | `URLSession`, hand-rolled SSE |
+| Voice | `SFSpeechRecognizer` + `AVSpeechSynthesizer`, behind protocols |
 | Tokens | Keychain, `AfterFirstUnlockThisDeviceOnly` |
 | Tests | Swift Testing |
 | Dependencies | **none** |
 
-Built against the iOS 26 SDK (required by App Store Connect since April 2026),
-deploying to **iOS 18**. Those are independent settings — see
-[ADR 007](../../docs/decisions/007-native-swiftui-client.md).
+Deploying to **iOS 18**, built against the current SDK — independent settings,
+see [ADR 007](../../docs/decisions/007-native-swiftui-client.md).
 
 ## Layout
 
 ```
 NOVA/
-├── App/           entry point, composition root, root navigation
-├── Core/          networking, coding, Keychain, session state
-├── Models/        API types, mirroring the server contract
+├── App/            entry point, composition root, root navigation
+├── Core/           networking, SSE, coding, Keychain, server settings
+├── Models/         API types, mirroring the server contract
 └── Features/
-    ├── Auth/      sign in and register
-    ├── Home/      device status and vitals
-    ├── Devices/   list, detail, claim
-    └── Settings/  account, sign out
+    ├── Auth/       sign in and register
+    ├── Dashboard/  the glanceable screen: AI, machine, projects, memory, tools
+    ├── Chat/       streaming replies, tool activity, confirmations
+    ├── Memory/     what NOVA knows, editable and deletable
+    ├── Tools/      what NOVA can do, and doing it by hand
+    ├── Voice/      speech in and out, off by default
+    └── Settings/   server address, account, voice
 ```
 
 `AppContainer` is the only place anything is constructed. Views receive what
 they need through the environment, which is what makes previews and tests
 possible without a server.
 
-## Two details that matter
+## Three details that matter
 
 **Refresh is serialised, and that is not an optimisation.** The API rotates
 refresh tokens and revokes the entire family when a rotated one is replayed
@@ -107,38 +114,71 @@ the first had already rotated — the server would correctly read that as theft
 and sign the user out everywhere. `APIClient` is an actor holding a single
 in-flight renewal task, so concurrent callers await one attempt.
 
+**The confirmation sheet is the same sheet everywhere.** A destructive action
+proposed by NOVA mid-conversation and one started from the Tools screen raise
+identical UI, carrying the server's words rather than the app's. The decision
+is the same decision, and it should not look different depending on how it was
+reached. The app cannot construct a confirmation of its own: the prompt and
+the token both come from the server, because only the server knows what the
+call would actually do.
+
 **Timestamps need a custom decoder.** The API emits microseconds
-(`2026-09-06T15:42:28.579713Z`) and `JSONDecoder`'s built-in `.iso8601`
+(`2026-09-16T15:42:28.579713Z`) and `JSONDecoder`'s built-in `.iso8601`
 strategy does not parse fractional seconds, so it would fail on almost every
 response. `JSONCoding` accepts both forms, because a timestamp landing exactly
 on a whole second serialises without the fractional part.
 
-## What Phase 3 covers
+## Voice
 
-- Register, sign in, sign out, session restore at launch
-- Device list, detail, rename, removal
-- **Claiming by typed code** — the flow from
-  [ADR 009](../../docs/decisions/009-device-claim-flow.md)
-- Home screen: status, vitals folded out of the telemetry stream
-- Sending head and expression commands to a connected device
+Off until it is turned on, in both directions.
 
-Chat, memory, and insights are Phases 4, 5 and 7. They are not stubbed here —
-an empty tab promises something that does not exist.
+Hold the microphone to talk; releasing puts the transcript **in the composer**
+to be read and edited before sending. Nothing is sent by voice without being
+seen — a terminal that acts on what it thought it heard is a terminal nobody
+trusts with a Docker socket.
+
+`requiresOnDeviceRecognition` is set wherever the device supports it. Without
+it, audio goes to Apple's servers, and a terminal whose whole premise is that
+nothing leaves the network should not quietly make an exception for the
+microphone.
+
+`SpeechRecogniser` and `Speaker` are protocols so a local Whisper on the same
+Mac as the model can replace the Apple implementations later — a new file
+rather than a refactor.
+
+## Testing
+
+```bash
+xcodebuild -project NOVA.xcodeproj -scheme NOVA \
+  -destination 'platform=iOS Simulator,name=iPhone 17' test
+```
+
+No server required. The decoding tests run against payloads captured from a
+running API rather than invented, and the model tests feed events in by hand —
+what is under test is how a transcript assembles, not how it arrived.
+
+`scripts/check_ios_contract.py` at the repository root compares every model
+here against the server's OpenAPI schema, including the enums this app mirrors
+from server literals. It runs on Linux in CI, so a contract break is caught on
+every push rather than only where a macOS runner is available.
 
 ## Privacy
 
 `PrivacyInfo.xcprivacy` declares email, name, and product interaction, none of
-it used for tracking. No camera string is needed: the device has no camera
-([ADR 008](../../docs/decisions/008-amoled-face-hardware.md)).
+it used for tracking. No camera is used at all.
 
-`NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription`
-become necessary in Phase 4, when voice input arrives.
+`NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription` and
+`NSLocalNetworkUsageDescription` are all present and all say what is actually
+done with the permission.
 
 ## Known gaps
 
-- **Never compiled.** See the notice above.
-- **No WebSocket client yet.** The app polls on appear and pull-to-refresh.
-  Live push is Phase 4, alongside streaming chat.
-- **Single device assumed.** The home screen shows the first claimed device.
-  The list handles several; the model does not need changing to support more.
-- **No UI tests.** They need a simulator to be meaningful.
+- **No conversation search or history browser.** One thread at a time, with
+  "New" to start another. The server has the rest.
+- **Tool activity is not persisted in the transcript.** Reopening a thread
+  shows what was said, without the machinery. The audit log under
+  Dashboard → recent activity is where "what did NOVA run" is answered
+  permanently.
+- **No push notifications.** "Tell me when the deploy fails" needs a scheduler
+  and an APNs certificate.
+- **One server at a time.** Switching is a Settings change and a sign-out.

@@ -52,13 +52,19 @@ enum JSONCoding {
 /// analytics response, so failing on it does not drop a field, it fails the
 /// whole decode and blanks the insights screen.
 enum ISO8601 {
-    private static let withFractional: ISO8601DateFormatter = {
+    // `nonisolated(unsafe)` on all three: `ISO8601DateFormatter` is not
+    // `Sendable`, but these are configured once inside their initialiser and
+    // never mutated afterwards, and `date(from:)` on a configured formatter
+    // is documented as safe to call concurrently. The alternative -- building
+    // a formatter per decode -- is measurably slower on a response with a
+    // hundred timestamps in it, which the conversation detail is.
+    nonisolated(unsafe) private static let withFractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
 
-    private static let withoutFractional: ISO8601DateFormatter = {
+    nonisolated(unsafe) private static let withoutFractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter
@@ -69,7 +75,7 @@ enum ISO8601 {
     /// The server has already done the timezone work: the value is the local
     /// calendar date the events fell on. Re-interpreting it in the phone's
     /// zone would shift a whole day's bar to the one either side of it.
-    private static let dateOnly: ISO8601DateFormatter = {
+    nonisolated(unsafe) private static let dateOnly: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withFullDate, .withDashSeparatorInDate]
         formatter.timeZone = TimeZone(identifier: "UTC")

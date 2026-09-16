@@ -1,7 +1,7 @@
 """Timezone validation.
 
 One place, because two things depend on agreeing about it: the schema that
-accepts a timezone from a client, and the SQL that buckets telemetry into
+accepts a timezone from a client, and any SQL that buckets activity into
 local hours. A name Python accepts but Postgres does not would pass
 validation and then fail at query time.
 """

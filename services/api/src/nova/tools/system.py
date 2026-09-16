@@ -1,0 +1,380 @@
+"""Tools that report on the machine NOVA runs on.
+
+All four are read-only and none of them shells out for the numbers that
+Python can read directly. ``os`` and ``shutil`` give load, CPU count and disk
+usage without spawning anything, which is both faster and one fewer process
+that could hang. Only the process list needs ``ps``, because there is no
+portable way to enumerate other processes from the standard library.
+
+Deliberately no psutil. It would give prettier memory figures on Linux, and
+it is a compiled dependency for four numbers that ``/proc`` and ``vm_stat``
+already publish.
+"""
+
+from __future__ import annotations
+
+import os
+import platform
+import shutil
+from typing import Annotated, Any
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from nova.core.config import ToolSettings
+from nova.tools.base import (
+    Permission,
+    Tool,
+    ToolContext,
+    ToolGroup,
+    ToolResult,
+    ToolSpec,
+    narrow,
+)
+from nova.tools.process import resolve_workspace_path, run
+
+# Processes listed at once. A full listing is hundreds of rows of noise; the
+# question behind "what's running" is always about the heavy ones.
+_PROCESS_LIMIT = 15
+
+
+class _SystemTool(Tool):
+    """Shared configuration for the tools that read this machine."""
+
+    def __init__(self, settings: ToolSettings) -> None:
+        self._settings = settings
+
+
+class SystemHealthTool(_SystemTool):
+    """Is this machine all right?"""
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="system_health",
+            description=(
+                "One-line verdict on the health of the machine NOVA runs on: "
+                "load average, memory pressure, and free disk. Use this when "
+                "asked whether the server or Mac is okay, rather than reading "
+                "each number separately."
+            ),
+            group=ToolGroup.SYSTEM,
+            permission=Permission.READ,
+        )
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        load = load_average()
+        cpus = os.cpu_count() or 1
+        disk = shutil.disk_usage(os.path.expanduser("~"))
+        disk_percent = round(disk.used / disk.total * 100, 1)
+
+        # Load per core, not raw load: "4.0" means nothing without knowing
+        # how many cores it is spread across.
+        load_ratio = load[0] / cpus if load else 0.0
+        problems = []
+        if load_ratio > 1.5:
+            problems.append(f"load is {load_ratio:.1f}x the core count")
+        if disk_percent > 90:
+            problems.append(f"disk is {disk_percent}% full")
+
+        healthy = not problems
+        summary = "Healthy." if healthy else "Under pressure: " + ", ".join(problems) + "."
+
+        data: dict[str, Any] = {
+            "healthy": healthy,
+            "hostname": platform.node(),
+            "platform": f"{platform.system()} {platform.release()}",
+            "cpu_count": cpus,
+            "load_average": list(load),
+            "load_per_core": round(load_ratio, 2),
+            "disk_percent_used": disk_percent,
+            "uptime_seconds": _uptime_seconds(),
+            "problems": problems,
+        }
+        return ToolResult(
+            content=(
+                f"{summary} {platform.node()} ({platform.system()} {platform.release()}), "
+                f"{cpus} cores, load {load_ratio:.2f} per core, "
+                f"disk {disk_percent}% used."
+            ),
+            data=data,
+        )
+
+
+class SystemResourcesTool(_SystemTool):
+    """CPU and memory, in numbers."""
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="system_resources",
+            description=(
+                "Current CPU load and memory usage for the machine NOVA runs "
+                "on, as numbers rather than a verdict."
+            ),
+            group=ToolGroup.SYSTEM,
+            permission=Permission.READ,
+        )
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        load = load_average()
+        cpus = os.cpu_count() or 1
+        memory = memory_usage()
+
+        lines = [
+            f"CPU: {cpus} cores, load {load[0]:.2f} / {load[1]:.2f} / {load[2]:.2f}"
+            if load
+            else f"CPU: {cpus} cores, load unavailable",
+        ]
+        if memory:
+            lines.append(
+                f"Memory: {_gib(memory['used_bytes'])} of {_gib(memory['total_bytes'])} used "
+                f"({memory['percent_used']}%)"
+            )
+        else:
+            lines.append("Memory: not readable on this platform")
+
+        return ToolResult(
+            content="\n".join(lines),
+            data={
+                "cpu_count": cpus,
+                "load_average": list(load),
+                "memory": memory,
+            },
+        )
+
+
+class DiskUsageInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: Annotated[
+        str | None,
+        Field(
+            default=None,
+            max_length=512,
+            description=(
+                "Directory to measure. Must be inside a directory NOVA is "
+                "configured to look at; omit for the default project root."
+            ),
+        ),
+    ] = None
+
+
+class DiskUsageTool(_SystemTool):
+    """How much room is left."""
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="disk_usage",
+            description=(
+                "Disk space on the volume holding a given directory: total, "
+                "used, free, and percentage."
+            ),
+            group=ToolGroup.SYSTEM,
+            permission=Permission.READ,
+            input_model=DiskUsageInput,
+        )
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        payload = narrow(arguments, DiskUsageInput)
+
+        # Resolved against the workspace roots even though reading usage is
+        # harmless, so that the path in the answer is one NOVA was allowed to
+        # name -- and so the model cannot use this to probe for directories.
+        target = (
+            resolve_workspace_path(payload.path, self._settings.workspace_roots)
+            if self._settings.workspace_roots or payload.path
+            else None
+        )
+        measured = str(target) if target else os.path.expanduser("~")
+
+        usage = shutil.disk_usage(measured)
+        percent = round(usage.used / usage.total * 100, 1)
+
+        return ToolResult(
+            content=(
+                f"{measured}: {_gib(usage.used)} used of {_gib(usage.total)} "
+                f"({percent}%), {_gib(usage.free)} free."
+            ),
+            data={
+                "path": measured,
+                "total_bytes": usage.total,
+                "used_bytes": usage.used,
+                "free_bytes": usage.free,
+                "percent_used": percent,
+            },
+        )
+
+
+class RunningProcessesTool(_SystemTool):
+    """What is using the machine."""
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="running_processes",
+            description=(
+                f"The {_PROCESS_LIMIT} processes using the most CPU right now, "
+                "with their memory share. Use this when asked what is running "
+                "or what is making the machine slow."
+            ),
+            group=ToolGroup.SYSTEM,
+            permission=Permission.READ,
+        )
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        # A fixed argv with no interpolation: there is nothing here a caller
+        # can influence, which is the easiest kind of command to be sure of.
+        result = await run(
+            ["ps", "-Aco", "pid,pcpu,pmem,comm", "-r"],
+            timeout_seconds=self._settings.command_timeout_seconds,
+            max_output_bytes=self._settings.max_output_bytes,
+        )
+        if not result.ok:
+            return ToolResult.failure("Could not list processes on this machine.")
+
+        rows = _parse_ps(result.stdout, limit=_PROCESS_LIMIT)
+        if not rows:
+            return ToolResult(content="No processes reported.", data={"processes": []})
+
+        lines = [f"{'PID':>7}  {'CPU%':>5}  {'MEM%':>5}  COMMAND"]
+        lines += [
+            f"{row['pid']:>7}  {row['cpu_percent']:>5}  {row['memory_percent']:>5}  {row['name']}"
+            for row in rows
+        ]
+        return ToolResult(content="\n".join(lines), data={"processes": rows})
+
+
+# -- helpers ------------------------------------------------------------------
+
+
+def load_average() -> tuple[float, float, float]:
+    try:
+        return os.getloadavg()
+    except OSError:  # pragma: no cover - not available on every platform
+        return (0.0, 0.0, 0.0)
+
+
+def _uptime_seconds() -> int | None:
+    """Seconds since boot, where the platform makes it readable.
+
+    Linux publishes it in ``/proc``. macOS does not, and the alternative is
+    parsing ``sysctl``, which is not worth a subprocess for one number that
+    the caller can live without.
+    """
+    try:
+        with open("/proc/uptime") as handle:
+            return int(float(handle.read().split()[0]))
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def memory_usage() -> dict[str, Any] | None:
+    """Memory usage, or ``None`` where it cannot be read without a subprocess."""
+    if reading := _linuxmemory_usage():
+        return reading
+    return _macosmemory_usage()
+
+
+def _linuxmemory_usage() -> dict[str, Any] | None:
+    try:
+        values: dict[str, int] = {}
+        with open("/proc/meminfo") as handle:
+            for line in handle:
+                key, _, rest = line.partition(":")
+                parts = rest.split()
+                if parts:
+                    values[key] = int(parts[0]) * 1024
+    except (OSError, ValueError):
+        return None
+
+    total = values.get("MemTotal")
+    available = values.get("MemAvailable")
+    if not total or available is None:
+        return None
+
+    used = total - available
+    return {
+        "total_bytes": total,
+        "used_bytes": used,
+        "available_bytes": available,
+        "percent_used": round(used / total * 100, 1),
+    }
+
+
+def _macosmemory_usage() -> dict[str, Any] | None:
+    """Physical memory and what is free, read through ``sysconf``.
+
+    ``SC_AVPHYS_PAGES`` under-reports what is actually reclaimable on macOS,
+    because the file cache counts as used. It is still the right number for
+    "is this machine under memory pressure", which is the question being
+    asked, and it needs no subprocess.
+    """
+    try:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        total_pages = os.sysconf("SC_PHYS_PAGES")
+        free_pages = os.sysconf("SC_AVPHYS_PAGES")
+    except (OSError, ValueError, AttributeError):  # pragma: no cover - platform dependent
+        return None
+
+    if total_pages <= 0 or page_size <= 0:  # pragma: no cover - platform dependent
+        return None
+
+    total = total_pages * page_size
+    available = max(free_pages, 0) * page_size
+    used = total - available
+    return {
+        "total_bytes": total,
+        "used_bytes": used,
+        "available_bytes": available,
+        "percent_used": round(used / total * 100, 1),
+    }
+
+
+def _parse_ps(output: str, *, limit: int) -> list[dict[str, Any]]:
+    """Turn ``ps`` output into rows, skipping anything that does not parse."""
+    rows: list[dict[str, Any]] = []
+    for line in output.splitlines()[1:]:
+        parts = line.split(None, 3)
+        if len(parts) < 4:
+            continue
+        pid, cpu, memory, name = parts
+        if not pid.isdigit():
+            continue
+
+        rows.append(
+            {
+                "pid": int(pid),
+                "cpu_percent": cpu,
+                "memory_percent": memory,
+                "name": name.strip(),
+            }
+        )
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def _gib(value: int) -> str:
+    return f"{value / 1024**3:.1f} GiB"
+
+
+def build_system_tools(settings: ToolSettings) -> list[Tool]:
+    """Every system tool, for the registry."""
+    return [
+        SystemHealthTool(settings),
+        SystemResourcesTool(settings),
+        DiskUsageTool(settings),
+        RunningProcessesTool(settings),
+    ]
+
+
+__all__ = [
+    "DiskUsageTool",
+    "RunningProcessesTool",
+    "SystemHealthTool",
+    "SystemResourcesTool",
+    "build_system_tools",
+    "load_average",
+    "memory_usage",
+]

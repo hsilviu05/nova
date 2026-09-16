@@ -1,6 +1,7 @@
 """AI provider abstraction.
 
-Business logic imports from here, never from a vendor SDK. See ADR 002.
+Business logic imports from here, never from a vendor SDK or a local
+runtime's own API. See ADR 002.
 """
 
 from nova.ai.base import (
@@ -9,7 +10,14 @@ from nova.ai.base import (
     ChatProvider,
     ChatRequest,
     EmbeddingProvider,
+    StreamCompleted,
+    StreamEvent,
+    TextDelta,
     TokenUsage,
+    ToolCall,
+    ToolCallRequested,
+    ToolDefinition,
+    ToolOutcome,
 )
 from nova.ai.errors import (
     AIConfigurationError,
@@ -29,7 +37,14 @@ __all__ = [
     "ChatProvider",
     "ChatRequest",
     "EmbeddingProvider",
+    "StreamCompleted",
+    "StreamEvent",
+    "TextDelta",
     "TokenUsage",
+    "ToolCall",
+    "ToolCallRequested",
+    "ToolDefinition",
+    "ToolOutcome",
     "build_chat_provider",
     "build_embedding_provider",
 ]

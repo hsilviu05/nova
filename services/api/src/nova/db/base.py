@@ -1,8 +1,8 @@
 """Declarative base and shared column mixins.
 
 Every table uses a UUID primary key and timezone-aware UTC timestamps, per the
-schema conventions in ARCHITECTURE.md. UUIDs let the ESP32 firmware and the
-mobile app mint identifiers offline without coordinating with the database.
+schema conventions in ARCHITECTURE.md. UUIDs let a client mint identifiers
+offline without coordinating with the database.
 """
 
 from __future__ import annotations

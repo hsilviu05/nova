@@ -1,19 +1,25 @@
 import SwiftUI
 
-/// Talking to NOVA.
+/// The main way to use NOVA.
+///
+/// Sized for a phone on a stand: the text is a step larger than a chat app's
+/// default, the microphone and send targets are comfortably past the 44pt
+/// minimum, and the composer stays pinned so nothing has to be scrolled to
+/// before it can be typed into.
 struct ChatView: View {
     @Environment(\.novaAPI) private var api
     @Environment(\.chatStream) private var stream
+    @Environment(VoiceStore.self) private var voice
 
     @State private var model: ChatModel?
     @State private var draft = ""
-    @FocusState private var inputFocused: Bool
+    @FocusState private var isComposing: Bool
 
     var body: some View {
         NavigationStack {
             Group {
                 if let model {
-                    transcript(model)
+                    conversation(model)
                 } else {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -21,80 +27,100 @@ struct ChatView: View {
             .navigationTitle("NOVA")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("New", systemImage: "square.and.pencil") {
                         Task { await model?.startNewConversation() }
-                    } label: {
-                        Label("New conversation", systemImage: "square.and.pencil")
                     }
-                    .disabled(model?.canSend == false)
+                    .disabled(model?.isStreaming ?? true)
                 }
             }
         }
         .task {
             if model == nil {
-                model = ChatModel(api: api, stream: stream)
+                let created = ChatModel(api: api, stream: stream)
+                model = created
+                await created.load()
             }
-            await model?.load()
         }
     }
 
-    private func transcript(_ model: ChatModel) -> some View {
+    @ViewBuilder
+    private func conversation(_ model: ChatModel) -> some View {
+        @Bindable var model = model
+
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
-                        if model.messages.isEmpty {
-                            EmptyTranscript()
-                        }
-
-                        ForEach(model.messages) { message in
-                            MessageBubble(message: message)
-                                .id(message.id)
+                        ForEach(model.transcript) { item in
+                            switch item {
+                            case let .message(message):
+                                MessageBubble(message: message)
+                                    .id(item.id)
+                            case let .tool(activity):
+                                ToolChip(activity: activity)
+                                    .id(item.id)
+                            }
                         }
 
                         if model.activity == .thinking {
-                            ThinkingIndicator().id(thinkingAnchor)
+                            ThinkingIndicator().id("activity")
                         }
 
                         if let error = model.error {
-                            InlineError(error: error)
+                            FailureRow(error: error, canRetry: model.canRetry) {
+                                model.retry()
+                            }
+                            .id("error")
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 20)
+                    .padding(16)
                 }
                 .scrollDismissesKeyboard(.interactively)
-                // Follow the newest content, including each delta, so a long
-                // reply stays in view as it is written.
-                .onChange(of: model.messages.last?.content) { _, _ in
+                .onChange(of: model.transcript.count) { _, _ in
                     scrollToEnd(proxy, model)
                 }
-                .onChange(of: model.activity) { _, _ in
+                .onChange(of: model.transcript.last) { _, _ in
                     scrollToEnd(proxy, model)
                 }
             }
 
             Composer(
                 draft: $draft,
-                isFocused: $inputFocused,
-                activity: model.activity,
-                onSend: {
-                    model.send(draft)
-                    draft = ""
-                },
-                onStop: { model.cancel() }
+                isComposing: $isComposing,
+                model: model,
+                onSend: { send(model) }
             )
         }
         .background(Color(.systemGroupedBackground))
+        .sheet(item: $model.pendingConfirmation) { confirmation in
+            ConfirmationSheet(
+                confirmation: confirmation,
+                onConfirm: { Task { await model.confirm() } },
+                onCancel: { model.declineConfirmation() }
+            )
+        }
+        .onChange(of: model.activity) { previous, current in
+            // Read the finished reply aloud, but only when the person turned
+            // speaking on and only once the reply is complete. Speaking
+            // fragments as they stream sounds like a stutter.
+            guard voice.speaksReplies, previous == .speaking, current == .idle,
+                  let text = model.lastAssistantText
+            else { return }
+            voice.speak(text)
+        }
     }
 
-    private var thinkingAnchor: String { "thinking" }
+    private func send(_ model: ChatModel) {
+        let text = draft
+        draft = ""
+        model.send(text)
+    }
 
     private func scrollToEnd(_ proxy: ScrollViewProxy, _ model: ChatModel) {
-        let target: AnyHashable? =
-            model.activity == .thinking ? thinkingAnchor : model.messages.last?.id
-
+        let target = model.error != nil
+            ? "error"
+            : (model.activity == .thinking ? "activity" : model.transcript.last?.id)
         guard let target else { return }
         withAnimation(.easeOut(duration: 0.2)) {
             proxy.scrollTo(target, anchor: .bottom)
@@ -102,57 +128,86 @@ struct ChatView: View {
     }
 }
 
-private struct EmptyTranscript: View {
-    var body: some View {
-        VStack(spacing: 14) {
-            NovaMark(size: 64)
-            Text("Say something.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
-    }
-}
+// MARK: - Transcript
 
 private struct MessageBubble: View {
     let message: ChatMessage
 
     var body: some View {
         HStack {
-            if message.isFromNova {
-                content
-                Spacer(minLength: 40)
-            } else {
-                Spacer(minLength: 40)
-                content
+            if !message.isFromNova { Spacer(minLength: 48) }
+
+            VStack(alignment: message.isFromNova ? .leading : .trailing, spacing: 4) {
+                // Markdown so code spans, fences and lists render as written.
+                // `.full` because NOVA is told it may use Markdown when it
+                // helps, and a terminal's answers are full of code.
+                Text(attributed)
+                    .font(.body)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        message.isFromNova
+                            ? AnyShapeStyle(Color(.secondarySystemGroupedBackground))
+                            : AnyShapeStyle(Color.accentColor.opacity(0.18)),
+                        in: .rect(cornerRadius: 16)
+                    )
             }
+
+            if message.isFromNova { Spacer(minLength: 48) }
         }
     }
 
-    private var content: some View {
-        Text(message.content)
-            .font(.body)
-            .textSelection(.enabled)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(background, in: .rect(cornerRadius: 18))
-            .foregroundStyle(message.isFromNova ? Color.primary : Color.white)
-            .frame(
-                maxWidth: .infinity,
-                alignment: message.isFromNova ? .leading : .trailing
-            )
-    }
-
-    private var background: Color {
-        message.isFromNova ? Color(.secondarySystemGroupedBackground) : .accentColor
+    /// Parsed once per render rather than stored, because the content of a
+    /// streaming bubble changes on every delta.
+    ///
+    /// Falls back to the raw text when parsing fails, which it does routinely
+    /// mid-stream: half a fenced block is not valid Markdown, and the
+    /// alternative to a fallback is text that flickers away and back.
+    private var attributed: AttributedString {
+        (try? AttributedString(
+            markdown: message.content,
+            options: .init(interpretedSyntax: .full, failurePolicy: .returnPartiallyParsedIfPossible)
+        )) ?? AttributedString(message.content)
     }
 }
 
-/// Three dots, shown only while NOVA is thinking.
-///
-/// Replaced by the reply itself as soon as the first delta arrives, so it
-/// never appears alongside text.
+/// What NOVA is doing to the machine, shown inline where it happened.
+private struct ToolChip: View {
+    let activity: ToolActivity
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Group {
+                if activity.isRunning {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: activity.isError
+                        ? "exclamationmark.triangle.fill"
+                        : "checkmark.circle.fill")
+                        .foregroundStyle(activity.isError ? .orange : .green)
+                }
+            }
+            .frame(width: 16)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(activity.name)
+                    .font(.footnote.monospaced().weight(.medium))
+                if let summary = activity.summary {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 12))
+    }
+}
+
 private struct ThinkingIndicator: View {
     @State private var phase = 0.0
 
@@ -160,67 +215,149 @@ private struct ThinkingIndicator: View {
         HStack(spacing: 5) {
             ForEach(0..<3, id: \.self) { index in
                 Circle()
-                    .fill(Color.secondary)
+                    .fill(.secondary)
                     .frame(width: 7, height: 7)
-                    .opacity(opacity(for: index))
+                    .opacity(0.35 + 0.65 * abs(sin(phase + Double(index) * 0.6)))
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 18))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear {
-            withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
-                phase = 3
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 16))
+        .task {
+            // A timer rather than a repeating animation: the value is read
+            // by three views and a phase offset is easier to reason about
+            // than three staggered animations.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(90))
+                phase += 0.35
             }
         }
-        .accessibilityLabel("NOVA is thinking")
-    }
-
-    private func opacity(for index: Int) -> Double {
-        let distance = abs(phase - Double(index))
-        return max(0.25, 1 - distance / 1.5)
     }
 }
 
-private struct Composer: View {
-    @Binding var draft: String
-    @FocusState.Binding var isFocused: Bool
-    let activity: ChatModel.Activity
-    let onSend: () -> Void
-    let onStop: () -> Void
-
-    private var canSend: Bool {
-        activity == .idle && !draft.trimmingCharacters(in: .whitespaces).isEmpty
-    }
+private struct FailureRow: View {
+    let error: APIError
+    let canRetry: Bool
+    let onRetry: () -> Void
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            TextField("Message", text: $draft, axis: .vertical)
-                .lineLimit(1...5)
-                .focused($isFocused)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(
-                    Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 20)
-                )
-                .onSubmit(onSend)
-
-            Button(action: activity == .idle ? onSend : onStop) {
-                Image(systemName: activity == .idle ? "arrow.up" : "stop.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
-                    .background(
-                        (canSend || activity != .idle) ? Color.accentColor : Color.secondary,
-                        in: .circle
-                    )
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(error.userMessage)
+                    .font(.footnote)
+                if canRetry {
+                    Button("Try again", action: onRetry)
+                        .font(.footnote.weight(.medium))
+                        .buttonStyle(.bordered)
+                }
             }
-            .disabled(activity == .idle && !canSend)
-            .accessibilityLabel(activity == .idle ? "Send" : "Stop")
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(12)
+        .card()
+    }
+}
+
+// MARK: - Composer
+
+private struct Composer: View {
+    @Binding var draft: String
+    @FocusState.Binding var isComposing: Bool
+    let model: ChatModel
+    let onSend: () -> Void
+
+    @Environment(VoiceStore.self) private var voice
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Divider()
+
+            if voice.isListening {
+                HStack(spacing: 8) {
+                    Image(systemName: "waveform")
+                        .foregroundStyle(.red)
+                        .symbolEffect(.variableColor.iterative)
+                    Text(voice.transcript.isEmpty ? "Listening…" : voice.transcript)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+            }
+
+            HStack(alignment: .bottom, spacing: 10) {
+                MicrophoneButton(draft: $draft)
+
+                TextField("Ask NOVA", text: $draft, axis: .vertical)
+                    .font(.body)
+                    .lineLimit(1...5)
+                    .focused($isComposing)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 20)
+                    )
+                    .submitLabel(.send)
+                    .onSubmit(onSend)
+
+                if model.isStreaming {
+                    Button {
+                        model.cancel()
+                    } label: {
+                        Image(systemName: "stop.circle.fill")
+                            .font(.system(size: 30))
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityLabel("Stop")
+                } else {
+                    Button(action: onSend) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 30))
+                    }
+                    .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .accessibilityLabel("Send")
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+        }
         .background(.bar)
+    }
+}
+
+/// Hold to talk.
+///
+/// Press-and-hold rather than tap-to-toggle: a microphone that is listening
+/// because somebody forgot to tap it again is exactly the thing that makes
+/// people distrust a device on their desk. Releasing puts the transcript in
+/// the composer to be read and edited before it is sent — nothing is sent by
+/// voice without being seen.
+private struct MicrophoneButton: View {
+    @Binding var draft: String
+    @Environment(VoiceStore.self) private var voice
+
+    var body: some View {
+        Image(systemName: voice.isListening ? "mic.fill" : "mic")
+            .font(.system(size: 22))
+            .foregroundStyle(voice.isListening ? .red : .secondary)
+            .frame(width: 44, height: 44)
+            .contentShape(.rect)
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        guard !voice.isListening else { return }
+                        Task { await voice.startListening() }
+                    }
+                    .onEnded { _ in
+                        let heard = voice.stopListening()
+                        guard !heard.isEmpty else { return }
+                        draft = draft.isEmpty ? heard : "\(draft) \(heard)"
+                    }
+            )
+            .accessibilityLabel("Hold to talk")
     }
 }

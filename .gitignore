@@ -40,13 +40,6 @@ npm-debug.log*
 yarn-error.log*
 
 # ---------------------------------------------------------------------------
-# ESP-IDF (firmware)
-# ---------------------------------------------------------------------------
-firmware/**/build/
-firmware/**/sdkconfig
-firmware/**/sdkconfig.old
-managed_components/
-
 # ---------------------------------------------------------------------------
 # ML — data and trained artifacts are not source. Model metadata is.
 # ---------------------------------------------------------------------------
@@ -68,17 +61,7 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Rendered STLs. Regenerate with `make` in hardware/case; committing them
-# would mean a binary diff on every parameter change.
-hardware/case/stl/
-hardware/case/*.check.stl
-
-# Host test builds for the firmware core.
-firmware/build/
-
 # ESP-IDF managed dependencies, fetched by idf.py.
-firmware/managed_components/
-firmware/dependencies.lock
 
 # Xcode.
 #

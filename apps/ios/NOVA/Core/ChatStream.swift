@@ -7,6 +7,13 @@ enum ChatStreamEvent: Sendable, Equatable {
     case message(ChatMessage)
     /// A fragment of the reply.
     case delta(String)
+    /// NOVA has begun running a tool.
+    case toolStarted(callID: String, name: String)
+    /// A tool has returned.
+    case toolFinished(callID: String, name: String, summary: String, isError: Bool)
+    /// NOVA wants to do something that needs the person's approval. Carries
+    /// the token that authorises exactly this call and nothing else.
+    case confirmationNeeded(PendingConfirmation)
     /// The reply is complete.
     case done
     /// The provider failed before producing anything.
@@ -28,20 +35,22 @@ struct ChatStreamClient: Sendable {
         self.tokens = tokens
 
         let config = URLSessionConfiguration.ephemeral
-        // No overall timeout: a reply legitimately takes as long as the model
-        // takes to think. The per-resource idle timeout below is what
-        // catches a genuinely dead connection.
-        config.timeoutIntervalForRequest = 120
-        config.timeoutIntervalForResource = 600
+        // No short overall timeout: a reply legitimately takes as long as the
+        // model takes to think, and a local model on a laptop that has just
+        // woken up is slow before it is fast. The per-resource timeout is
+        // what catches a genuinely dead connection.
+        config.timeoutIntervalForRequest = 180
+        config.timeoutIntervalForResource = 900
+        config.waitsForConnectivity = false
         self.session = URLSession(configuration: config)
     }
 
     /// Send a message and stream the reply.
     ///
     /// Throws before yielding anything if the request itself fails -- an
-    /// unknown conversation, an expired session -- so those surface as
-    /// ordinary errors rather than as an event inside a stream the UI has
-    /// already begun rendering.
+    /// unknown conversation, an expired session, an unreachable server -- so
+    /// those surface as ordinary errors rather than as an event inside a
+    /// stream the UI has already begun rendering.
     func send(
         _ content: String, to conversationID: UUID
     ) -> AsyncThrowingStream<ChatStreamEvent, Error> {
@@ -81,7 +90,15 @@ struct ChatStreamClient: Sendable {
             request.setValue("Bearer \(access)", forHTTPHeaderField: "Authorization")
         }
 
-        let (bytes, response) = try await session.bytes(for: request)
+        let (bytes, response): (URLSession.AsyncBytes, URLResponse)
+        do {
+            (bytes, response) = try await session.bytes(for: request)
+        } catch let error as URLError {
+            // A phone that has moved off the Wi-Fi, or a Mac that went to
+            // sleep. Reported as a transport failure so the UI can say
+            // "NOVA server unavailable" rather than something about JSON.
+            throw APIError.transport(error)
+        }
 
         guard let http = response as? HTTPURLResponse else {
             throw APIError.undecodable(status: 0, underlying: "Not an HTTP response")
@@ -131,6 +148,56 @@ struct ChatStreamClient: Sendable {
             struct Delta: Decodable { let text: String }
             return (try? JSONCoding.decoder.decode(Delta.self, from: payload))
                 .map { .delta($0.text) }
+
+        case "tool":
+            struct Started: Decodable {
+                let callId: String
+                let name: String
+            }
+            return (try? JSONCoding.decoder.decode(Started.self, from: payload))
+                .map { .toolStarted(callID: $0.callId, name: $0.name) }
+
+        case "tool_result":
+            struct Finished: Decodable {
+                let callId: String
+                let name: String
+                let summary: String
+                let isError: Bool
+            }
+            return (try? JSONCoding.decoder.decode(Finished.self, from: payload))
+                .map {
+                    .toolFinished(
+                        callID: $0.callId,
+                        name: $0.name,
+                        summary: $0.summary,
+                        isError: $0.isError
+                    )
+                }
+
+        case "confirm":
+            struct Confirm: Decodable {
+                let callId: String
+                let name: String
+                let prompt: String
+                let confirmationToken: String
+                let arguments: [String: JSONValue]
+            }
+            return (try? JSONCoding.decoder.decode(Confirm.self, from: payload))
+                .map {
+                    .confirmationNeeded(
+                        PendingConfirmation(
+                            tool: $0.name,
+                            prompt: $0.prompt,
+                            token: $0.confirmationToken,
+                            // Flattened to strings because that is the shape
+                            // the invoke request takes, and every argument a
+                            // tool accepts is scalar.
+                            arguments: $0.arguments.compactMapValues { value in
+                                value.stringValue ?? value.displayValue
+                            }
+                        )
+                    )
+                }
 
         case "done":
             return .done

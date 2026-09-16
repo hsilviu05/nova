@@ -14,22 +14,12 @@ protocol NovaAPI: Sendable {
     func currentUser() async throws -> User
     func updateProfile(displayName: String?, timezone: String?) async throws -> User
 
-    func devices() async throws -> [Device]
-    func device(id: UUID) async throws -> Device
-    func claimDevice(code: String, name: String?) async throws -> Device
-    func renameDevice(id: UUID, name: String) async throws -> Device
-    func removeDevice(id: UUID) async throws
-
     func conversations() async throws -> [Conversation]
     func conversation(id: UUID) async throws -> ConversationDetail
     func createConversation(title: String?) async throws -> Conversation
     func deleteConversation(id: UUID) async throws
     func sendMessage(_ content: String, to conversationID: UUID) async throws
         -> MessageExchange
-
-    func telemetry(deviceID: UUID, limit: Int, eventType: String?) async throws
-        -> [TelemetryEvent]
-    func send(_ command: DeviceCommand, to deviceID: UUID) async throws -> CommandAccepted
 
     func memories(category: MemoryCategory?, limit: Int, offset: Int) async throws
         -> MemoryPage
@@ -38,8 +28,13 @@ protocol NovaAPI: Sendable {
     func deleteMemory(id: UUID) async throws
     func forgetEverything() async throws
 
-    func analytics(deviceID: UUID, windowDays: Int) async throws -> Analytics
-    func insights(deviceID: UUID, windowDays: Int) async throws -> Insights
+    func systemStatus() async throws -> SystemStatus
+    func activity(limit: Int) async throws -> ActivityPage
+
+    func tools() async throws -> ToolList
+    func invokeTool(
+        _ name: String, arguments: [String: String], confirmationToken: String?
+    ) async throws -> ToolRunResult
 }
 
 /// `NovaAPI` over HTTP.
@@ -96,10 +91,6 @@ struct LiveNovaAPI: NovaAPI {
     }
 
     /// Both fields are optional; omitted means unchanged.
-    ///
-    /// The timezone matters more than it looks: every hour-of-day figure on
-    /// the insights screen is bucketed server-side in it, so leaving it at
-    /// UTC puts someone's evening in the middle of their night.
     func updateProfile(
         displayName: String? = nil, timezone: String? = nil
     ) async throws -> User {
@@ -109,42 +100,6 @@ struct LiveNovaAPI: NovaAPI {
                 path: "users/me",
                 body: UpdateProfileRequest(displayName: displayName, timezone: timezone)
             )
-        )
-    }
-
-    // MARK: - Devices
-
-    func devices() async throws -> [Device] {
-        try await client.send(Request(path: "devices"))
-    }
-
-    func device(id: UUID) async throws -> Device {
-        try await client.send(Request(path: "devices/\(id.uuidString.lowercased())"))
-    }
-
-    func claimDevice(code: String, name: String?) async throws -> Device {
-        try await client.send(
-            Request(
-                method: .post,
-                path: "devices/claim",
-                body: ClaimDeviceRequest(code: code, name: name)
-            )
-        )
-    }
-
-    func renameDevice(id: UUID, name: String) async throws -> Device {
-        try await client.send(
-            Request(
-                method: .patch,
-                path: "devices/\(id.uuidString.lowercased())",
-                body: RenameDeviceRequest(name: name)
-            )
-        )
-    }
-
-    func removeDevice(id: UUID) async throws {
-        try await client.send(
-            Request(method: .delete, path: "devices/\(id.uuidString.lowercased())")
         )
     }
 
@@ -180,8 +135,9 @@ struct LiveNovaAPI: NovaAPI {
 
     /// Send and wait for the whole reply.
     ///
-    /// The streaming path is `ChatStreamClient`; this exists for callers
-    /// that would rather have one response than parse an event stream.
+    /// The streaming path is `ChatStreamClient`, and it is the one the app
+    /// actually uses: tools only run there, because tool use is something a
+    /// person watches happen. This exists for callers with nobody watching.
     func sendMessage(
         _ content: String, to conversationID: UUID
     ) async throws -> MessageExchange {
@@ -190,31 +146,6 @@ struct LiveNovaAPI: NovaAPI {
                 method: .post,
                 path: "conversations/\(conversationID.uuidString.lowercased())/messages",
                 body: SendMessageRequest(content: content)
-            )
-        )
-    }
-
-    // MARK: - Telemetry and commands
-
-    func telemetry(
-        deviceID: UUID, limit: Int = 100, eventType: String? = nil
-    ) async throws -> [TelemetryEvent] {
-        var query = ["limit": String(limit)]
-        if let eventType { query["event_type"] = eventType }
-
-        return try await client.send(
-            Request(path: "devices/\(deviceID.uuidString.lowercased())/telemetry", query: query)
-        )
-    }
-
-    func send(
-        _ command: DeviceCommand, to deviceID: UUID
-    ) async throws -> CommandAccepted {
-        try await client.send(
-            Request(
-                method: .post,
-                path: "devices/\(deviceID.uuidString.lowercased())/commands",
-                body: command
             )
         )
     }
@@ -257,22 +188,55 @@ struct LiveNovaAPI: NovaAPI {
         try await client.send(Request(method: .delete, path: "memories"))
     }
 
-    // MARK: - Analytics
+    // MARK: - System
 
-    func analytics(deviceID: UUID, windowDays: Int = 30) async throws -> Analytics {
+    /// Everything the dashboard shows, in one request.
+    ///
+    /// A longer timeout than the default: this probes the model provider and
+    /// every configured project, and on a cold Ollama the first token can
+    /// take a few seconds. Still bounded, because a dashboard that hangs is
+    /// worse than one that says it could not reach something.
+    func systemStatus() async throws -> SystemStatus {
+        try await client.send(Request(path: "system/status", timeout: 30))
+    }
+
+    func activity(limit: Int = 50) async throws -> ActivityPage {
         try await client.send(
-            Request(
-                path: "devices/\(deviceID.uuidString.lowercased())/analytics",
-                query: ["window_days": String(windowDays)]
-            )
+            Request(path: "system/activity", query: ["limit": String(limit)])
         )
     }
 
-    func insights(deviceID: UUID, windowDays: Int = 30) async throws -> Insights {
+    // MARK: - Tools
+
+    func tools() async throws -> ToolList {
+        try await client.send(Request(path: "tools"))
+    }
+
+    /// Run a tool.
+    ///
+    /// Without a token, a destructive tool answers 409 and the error carries
+    /// the prompt to show and the token to send back. That round trip is the
+    /// confirmation: there is no way to skip it from here, because there is
+    /// no other endpoint.
+    func invokeTool(
+        _ name: String,
+        arguments: [String: String],
+        confirmationToken: String? = nil
+    ) async throws -> ToolRunResult {
         try await client.send(
             Request(
-                path: "devices/\(deviceID.uuidString.lowercased())/insights",
-                query: ["window_days": String(windowDays)]
+                method: .post,
+                path: "tools/invoke",
+                body: InvokeToolRequest(
+                    name: name,
+                    arguments: arguments,
+                    confirmationToken: confirmationToken
+                ),
+                // Tools spawn processes and reach other services. The
+                // server's own budget is shorter than this; the margin is so
+                // a tool that times out reports as a timeout rather than as
+                // the phone giving up first.
+                timeout: 45
             )
         )
     }

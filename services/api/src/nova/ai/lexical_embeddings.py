@@ -102,6 +102,10 @@ class LexicalEmbeddingProvider:
     async def embed(self, texts: list[str]) -> list[list[float]]:
         return [self._vector(text) for text in texts]
 
+    async def aclose(self) -> None:
+        """Nothing to release; this provider holds no connection."""
+        return None
+
     # -- internals --------------------------------------------------------
 
     def _features(self, text: str) -> Counter[str]:

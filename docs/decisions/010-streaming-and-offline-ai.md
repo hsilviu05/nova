@@ -1,6 +1,6 @@
 # 010 — Streaming chat over SSE, with an offline provider
 
-**Status:** Accepted · **Date:** 2026-09-06
+**Status:** Accepted · **Date:** 2026-09-06 · **Amended:** 2026-09-16 — see [Amendment](#amendment-2026-09-16)
 
 ## Context
 
@@ -142,3 +142,39 @@ chat UI complicates the thing this phase exists to deliver.
 - Conversation history sent to the model is bounded by a turn count. Older
   context returns through semantic memory in Phase 5 rather than by raising
   that ceiling.
+
+
+## Amendment (2026-09-16)
+
+Both decisions held through the refactor to a phone-first terminal, and one of
+them held for a reason that had not occurred to anyone when it was made.
+
+**SSE survived, and the argument for it got stronger.** The original reasoning
+was that a reply is one-directional and short-lived, so a WebSocket was more
+machinery than the job needed. What was not anticipated is that the reply
+stream would grow *three new event types* — `tool`, `tool_result` and
+`confirm` — as NOVA gained the ability to do things mid-reply. An open,
+named-event format absorbed that without a protocol version bump, because
+clients were already written to ignore event types they do not recognise. A
+hand-rolled WebSocket message format would have needed a version negotiation
+for the same change.
+
+The one argument in the original that no longer applies is "NOVA already has a
+WebSocket for the device". It does not. That removes a reason *for* WebSocket
+rather than against, so the conclusion is unchanged.
+
+**The offline provider survived, and its second job changed.** It was
+justified as a way to run the test suite without an API key and to keep a
+desk companion answering when the network was gone. The first is still exactly
+true — the whole conversation path, including the tool loop, is exercised with
+no model server anywhere. The second is now about a different failure: the
+model runs on the same machine as the API, so "the provider is unreachable"
+usually means Ollama is not running or is still loading a model. Answering
+with an honest canned line while `/api/v1/system/status` says plainly that no
+model is attached is better than a terminal that will not start.
+
+What did change is the interface it implements. `stream()` now yields *events*
+rather than strings, and providers declare `supports_tools`. The offline
+provider returns `False`, and that is load-bearing rather than cosmetic: a
+model told how to use tools it cannot call will describe running them, which
+reads as NOVA claiming to have checked something it never looked at.
