@@ -11,7 +11,7 @@ is down is a dashboard that stops working exactly when it is needed.
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import pytest
@@ -47,7 +47,7 @@ class UnreachableProvider:
     async def aclose(self) -> None:
         return None
 
-    async def stream(self, request: ChatRequest) -> AsyncIterator[StreamEvent]:
+    async def stream(self, request: ChatRequest) -> AsyncGenerator[StreamEvent, None]:
         raise AIUnavailableError(
             "The local model server is not reachable. Is Ollama running?",
             code="ai_local_model_unreachable",

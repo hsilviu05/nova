@@ -14,8 +14,10 @@ import gc
 import inspect
 import types
 import uuid
+from typing import cast
 
 import pytest
+from fastapi import Request
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -26,10 +28,19 @@ from nova.core.errors import NotFoundError
 pytestmark = pytest.mark.integration
 
 
-def _fake_request(session_factory: async_sessionmaker[AsyncSession]) -> types.SimpleNamespace:
-    """The only thing ``get_session`` reads off the request."""
-    return types.SimpleNamespace(
-        app=types.SimpleNamespace(state=types.SimpleNamespace(session_factory=session_factory))
+def _fake_request(session_factory: async_sessionmaker[AsyncSession]) -> Request:
+    """The only thing ``get_session`` reads off the request.
+
+    Cast rather than constructed: a real ``Request`` needs an ASGI scope,
+    a receive channel and a send channel, none of which this test has any
+    use for. The cast is the honest description of what is happening --
+    this stands in for a Request in the one respect that matters.
+    """
+    return cast(
+        "Request",
+        types.SimpleNamespace(
+            app=types.SimpleNamespace(state=types.SimpleNamespace(session_factory=session_factory))
+        ),
     )
 
 

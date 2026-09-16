@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from typing import Annotated
 
@@ -248,7 +248,7 @@ async def _reply_events(
     reply: list[str],
     *,
     request_id: str | None,
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str, None]:
     """The event-stream body: the stored user turn, then whatever NOVA does.
 
     Text chunks are also appended to ``reply`` for the background task. Tool

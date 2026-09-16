@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Any
 
 import pytest
@@ -67,7 +67,7 @@ class RememberingProvider:
     def _is_extraction(self, request: ChatRequest) -> bool:
         return request.system.startswith("You extract")
 
-    async def stream(self, request: ChatRequest) -> AsyncIterator[StreamEvent]:
+    async def stream(self, request: ChatRequest) -> AsyncGenerator[StreamEvent, None]:
         self.contexts.append(request.context)
         yield TextDelta("Understood.")
         yield StreamCompleted(stop_reason="end_turn", model=self.model)
@@ -719,6 +719,9 @@ class TestDegradedRetrieval:
 
             async def embed(self, texts: list[str]) -> list[list[float]]:
                 raise RuntimeError("embedding backend is down")
+
+            async def aclose(self) -> None:
+                return None
 
         app = build_test_app(
             settings,

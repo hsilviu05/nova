@@ -59,9 +59,17 @@ mlruns/
 Thumbs.db
 *.swp
 .idea/
-.vscode/
-
-# ESP-IDF managed dependencies, fetched by idf.py.
+.vscode/*
+# ...except the workspace settings, which are checked in. Without them the
+# editor uses the system Python, cannot resolve fastapi, jwt or argon2, and
+# reports dozens of errors in code that is fine. That is not a personal
+# preference, it is the difference between a clone that opens clean and one
+# that looks broken.
+#
+# `.vscode/*` rather than `.vscode/`: git will not re-include a file whose
+# parent directory is excluded, so the negation below only works against a
+# pattern that matches the contents rather than the directory itself.
+!.vscode/settings.json
 
 # Xcode.
 #

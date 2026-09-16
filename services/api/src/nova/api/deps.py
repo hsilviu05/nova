@@ -9,7 +9,7 @@ in this module rather than across every route.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Annotated
 
 from fastapi import Depends, Request
@@ -74,12 +74,16 @@ def get_password_hasher(request: Request) -> PasswordHasher:
 # -- request-scoped -----------------------------------------------------------
 
 
-async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
+async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
     """Yield the request's unit of work.
 
     ``async with``, never ``async for``: when a handler raises, FastAPI
     throws that exception in here, and delegating with ``async for`` would
     abandon the scope mid-flight instead of unwinding it.
+
+    Typed as a generator rather than an iterator because that throw is
+    ``athrow``, which only a generator has -- and it is the behaviour
+    ``test_session_lifecycle`` drives directly.
     """
     async with session_scope(request.app.state.session_factory) as session:
         yield session

@@ -17,7 +17,7 @@ What is being pinned down:
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import pytest
@@ -83,7 +83,7 @@ class ScriptedProvider:
     async def aclose(self) -> None:
         return None
 
-    async def stream(self, request: ChatRequest) -> AsyncIterator[StreamEvent]:
+    async def stream(self, request: ChatRequest) -> AsyncGenerator[StreamEvent, None]:
         self.requests.append(request)
 
         if self._script:

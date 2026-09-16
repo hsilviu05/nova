@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import pytest
@@ -58,7 +58,7 @@ class FailingProvider(_Provider):
     def model(self) -> str:
         return "failing-model"
 
-    async def stream(self, request: ChatRequest) -> AsyncIterator[StreamEvent]:
+    async def stream(self, request: ChatRequest) -> AsyncGenerator[StreamEvent, None]:
         raise self._error
         yield StreamCompleted()  # pragma: no cover - keeps this a generator
 
@@ -84,7 +84,7 @@ class TruncatingProvider(_Provider):
     def model(self) -> str:
         return "truncating-model"
 
-    async def stream(self, request: ChatRequest) -> AsyncIterator[StreamEvent]:
+    async def stream(self, request: ChatRequest) -> AsyncGenerator[StreamEvent, None]:
         for word in self._text.split():
             yield TextDelta(word + " ")
         raise AIUnavailableError()
@@ -116,7 +116,7 @@ class ClosureRecordingProvider(_Provider):
     def model(self) -> str:
         return "recording-model"
 
-    async def stream(self, request: ChatRequest) -> AsyncIterator[StreamEvent]:
+    async def stream(self, request: ChatRequest) -> AsyncGenerator[StreamEvent, None]:
         try:
             for word in ("I", "was", "about", "to", "say"):
                 yield TextDelta(word + " ")
@@ -346,7 +346,7 @@ class TestClientDisconnect:
         from nova.ai.offline import OfflineChatProvider
         from nova.models.conversation import Conversation, Message
         from nova.models.user import User
-        from nova.services.conversation import ChatStreamer
+        from nova.services.conversation import ChatStreamer, ReplyDelta
 
         async with session_factory() as session:
             user = User(
@@ -375,6 +375,11 @@ class TestClientDisconnect:
         first = await anext(stream)
         await stream.aclose()
 
+        # A provider that cannot call tools yields nothing but text, so the
+        # first event is a delta. Narrowed rather than assumed: the stream
+        # now carries tool activity too, and a test that read `.text` off
+        # whatever arrived would pass today and break confusingly later.
+        assert isinstance(first, ReplyDelta)
         assert first.text
 
         async with session_factory() as session:
