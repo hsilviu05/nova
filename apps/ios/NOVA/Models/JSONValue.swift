@@ -2,10 +2,11 @@ import Foundation
 
 /// A decoded JSON value of unknown shape.
 ///
-/// Telemetry events carry a `payload` of event-specific fields that do not
-/// warrant a column server-side — `{"source": "time_of_flight"}` and the
-/// like. The set grows with every firmware feature, so the app decodes it
-/// generically rather than adding a Swift type per event.
+/// Two places need one. A tool's `input_schema` is JSON Schema, which the
+/// Tools screen reads field names out of and otherwise treats as opaque. A
+/// tool's `data` is whatever that tool returns — a container list, a disk
+/// reading, a health report — and a Swift type per tool would mean shipping
+/// an app update every time the server grows one.
 ///
 /// Deliberately small: it exists to display and inspect values, not to be a
 /// general JSON library.

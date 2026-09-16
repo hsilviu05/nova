@@ -1,6 +1,35 @@
 import Foundation
 import Observation
 
+/// One item in the transcript.
+///
+/// Tool activity is part of the transcript rather than an overlay, because it
+/// is part of what happened: "I checked SnapWorth" belongs in the thread
+/// between the question and the answer, and a spinner that disappears leaves
+/// no record that anything was checked at all.
+enum TranscriptItem: Identifiable, Equatable, Sendable {
+    case message(ChatMessage)
+    case tool(ToolActivity)
+
+    var id: String {
+        switch self {
+        case let .message(message): message.id.uuidString
+        case let .tool(activity): activity.callID
+        }
+    }
+}
+
+/// A tool NOVA ran, or is running, mid-reply.
+struct ToolActivity: Identifiable, Equatable, Sendable {
+    let callID: String
+    let name: String
+    var summary: String?
+    var isError = false
+
+    var id: String { callID }
+    var isRunning: Bool { summary == nil }
+}
+
 /// Drives one conversation.
 @MainActor
 @Observable
@@ -9,14 +38,24 @@ final class ChatModel {
     enum Activity: Equatable {
         case idle
         case thinking
+        case usingTool(String)
         case speaking
     }
 
-    private(set) var messages: [ChatMessage] = []
+    private(set) var transcript: [TranscriptItem] = []
     private(set) var activity: Activity = .idle
     private(set) var conversationID: UUID?
     private(set) var isLoading = false
+
+    /// A destructive action NOVA has proposed. The app raises the same sheet
+    /// the Tools screen does, so the moment of consent looks identical
+    /// wherever it is reached from.
+    var pendingConfirmation: PendingConfirmation?
     var error: APIError?
+
+    /// The last thing sent, so a failed send can be retried without making
+    /// someone type it again.
+    private(set) var lastSent: String?
 
     /// The id of the assistant turn currently being assembled, so deltas
     /// append to it rather than creating a bubble per fragment.
@@ -36,6 +75,24 @@ final class ChatModel {
         activity == .idle && !isLoading
     }
 
+    var isStreaming: Bool {
+        activity != .idle
+    }
+
+    var canRetry: Bool {
+        lastSent != nil && error != nil && canSend
+    }
+
+    /// The most recent thing NOVA said in full, for reading aloud.
+    var lastAssistantText: String? {
+        for item in transcript.reversed() {
+            if case let .message(message) = item, message.isFromNova {
+                return message.content
+            }
+        }
+        return nil
+    }
+
     // MARK: - Loading
 
     /// Open the most recent conversation, or start one.
@@ -51,14 +108,14 @@ final class ChatModel {
             }
 
             // Continue where the owner left off rather than opening a fresh
-            // thread every launch -- a companion with no memory of the last
+            // thread every launch -- a terminal with no memory of the last
             // exchange is a search box.
             if let existing = try await api.conversations().first {
                 conversationID = existing.id
                 try await loadDetail(existing.id)
             } else {
                 conversationID = try await api.createConversation(title: nil).id
-                messages = []
+                transcript = []
             }
             error = nil
         } catch let apiError as APIError {
@@ -69,7 +126,11 @@ final class ChatModel {
     }
 
     private func loadDetail(_ id: UUID) async throws {
-        messages = try await api.conversation(id: id).messages
+        // Tool activity is not persisted as messages, so a reloaded thread
+        // shows what was said without the machinery. That is the right
+        // trade: the audit log is where "what did NOVA run" is answered
+        // permanently, and it is a screen of its own.
+        transcript = try await api.conversation(id: id).messages.map(TranscriptItem.message)
         error = nil
     }
 
@@ -78,7 +139,8 @@ final class ChatModel {
         cancel()
         do {
             conversationID = try await api.createConversation(title: nil).id
-            messages = []
+            transcript = []
+            lastSent = nil
             error = nil
         } catch let apiError as APIError {
             error = apiError
@@ -97,8 +159,9 @@ final class ChatModel {
         // without waiting for a round trip; the server echoes the stored
         // turn and it is replaced below.
         let optimistic = ChatMessage.pending(content)
-        messages.append(optimistic)
+        transcript.append(.message(optimistic))
         activity = .thinking
+        lastSent = content
         error = nil
 
         streamTask = Task { [weak self] in
@@ -106,29 +169,28 @@ final class ChatModel {
         }
     }
 
+    /// Send the last message again after a failure.
+    func retry() {
+        guard let content = lastSent, canSend else { return }
+        // Drop the failed turn first: the server never stored it, so leaving
+        // it would show the question twice.
+        if case let .message(last)? = transcript.last, last.role == .user,
+           last.content == content {
+            transcript.removeLast()
+        }
+        error = nil
+        send(content)
+    }
+
     private func consume(
         _ content: String, _ conversationID: UUID, replacing optimisticID: UUID
     ) async {
         do {
             for try await event in stream.send(content, to: conversationID) {
-                switch event {
-                case let .message(stored):
+                if case let .message(stored) = event {
                     replace(optimisticID, with: stored)
-
-                case let .delta(text):
-                    appendDelta(text)
-
-                case .done:
-                    finish()
-
-                case let .failed(code, message):
-                    error = .api(
-                        status: 502,
-                        envelope: .init(
-                            code: code, message: message, requestId: nil, details: nil
-                        )
-                    )
-                    finish()
+                } else {
+                    apply(event)
                 }
             }
             // A stream ending without `done` was cut short. Whatever arrived
@@ -145,6 +207,54 @@ final class ChatModel {
         }
     }
 
+    /// Fold one stream event into the transcript.
+    ///
+    /// Separated from the loop above so it can be exercised directly. What
+    /// is worth testing here is how events assemble -- deltas joining into
+    /// one bubble, a tool splitting them, a proposal becoming a sheet rather
+    /// than an action -- and none of that is a question about transport.
+    ///
+    /// `.message` is handled by the caller, which is the only place that
+    /// knows which optimistic turn it replaces.
+    func apply(_ event: ChatStreamEvent) {
+        switch event {
+        case let .message(stored):
+            transcript.append(.message(stored))
+
+        case let .delta(text):
+            appendDelta(text)
+
+        case let .toolStarted(callID, name):
+            activity = .usingTool(name)
+            // Closes the current bubble, so anything NOVA says after the
+            // tool lands in a new one below it and the order reads the way
+            // it happened.
+            streamingID = nil
+            transcript.append(.tool(ToolActivity(callID: callID, name: name)))
+
+        case let .toolFinished(callID, _, summary, isError):
+            finishTool(callID, summary: summary, isError: isError)
+
+        case let .confirmationNeeded(confirmation):
+            pendingConfirmation = confirmation
+
+        case .done:
+            finish()
+
+        case let .failed(code, message):
+            error = .api(
+                status: 502,
+                envelope: .init(
+                    code: code,
+                    message: message,
+                    requestId: nil,
+                    details: nil
+                )
+            )
+            finish()
+        }
+    }
+
     /// Stop the reply. The server keeps what it already produced.
     func cancel() {
         streamTask?.cancel()
@@ -152,24 +262,81 @@ final class ChatModel {
         finish()
     }
 
+    // MARK: - Confirmations
+
+    /// Go ahead with what NOVA proposed.
+    ///
+    /// Run through the ordinary tool endpoint rather than through the
+    /// conversation: approving an action is a direct instruction from a
+    /// person, and it should be recorded as one. The result is posted back
+    /// into the thread as a message so the transcript stays honest about
+    /// what happened.
+    func confirm() async {
+        guard let confirmation = pendingConfirmation else { return }
+        pendingConfirmation = nil
+        activity = .usingTool(confirmation.tool)
+        defer { activity = .idle }
+
+        let callID = "confirmed-\(confirmation.token.prefix(8))"
+        transcript.append(.tool(ToolActivity(callID: callID, name: confirmation.tool)))
+
+        do {
+            let result = try await api.invokeTool(
+                confirmation.tool,
+                arguments: confirmation.arguments,
+                confirmationToken: confirmation.token
+            )
+            finishTool(
+                callID,
+                summary: result.content.split(separator: "\n").first.map(String.init)
+                    ?? "Done",
+                isError: result.isError
+            )
+        } catch let apiError as APIError {
+            finishTool(callID, summary: apiError.userMessage, isError: true)
+            error = apiError
+        } catch {
+            finishTool(callID, summary: "Failed", isError: true)
+        }
+    }
+
+    func declineConfirmation() {
+        pendingConfirmation = nil
+    }
+
     // MARK: - Transcript maintenance
 
     private func replace(_ id: UUID, with stored: ChatMessage) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[index] = stored
+        guard let index = index(of: id) else { return }
+        transcript[index] = .message(stored)
     }
 
     private func appendDelta(_ text: String) {
         activity = .speaking
 
-        if let id = streamingID,
-           let index = messages.firstIndex(where: { $0.id == id }) {
-            messages[index] = .streaming(messages[index].content + text, id: id)
+        if let id = streamingID, let index = index(of: id),
+           case let .message(existing) = transcript[index] {
+            transcript[index] = .message(.streaming(existing.content + text, id: id))
         } else {
             let id = UUID()
             streamingID = id
-            messages.append(.streaming(text, id: id))
+            transcript.append(.message(.streaming(text, id: id)))
         }
+    }
+
+    private func finishTool(_ callID: String, summary: String, isError: Bool) {
+        guard let index = transcript.firstIndex(where: { $0.id == callID }),
+              case let .tool(existing) = transcript[index]
+        else { return }
+
+        var finished = existing
+        finished.summary = summary
+        finished.isError = isError
+        transcript[index] = .tool(finished)
+    }
+
+    private func index(of id: UUID) -> Int? {
+        transcript.firstIndex { $0.id == id.uuidString }
     }
 
     private func finish() {
@@ -182,7 +349,7 @@ final class ChatModel {
     /// Only safe because this runs when nothing was persisted; a failure
     /// *after* the user turn was stored keeps it, since the server has it.
     private func rollback(_ id: UUID) {
-        messages.removeAll { $0.id == id }
+        transcript.removeAll { $0.id == id.uuidString }
         finish()
     }
 }

@@ -5,9 +5,9 @@ struct User: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     let email: String
     let displayName: String
-    /// IANA name. Every hour-of-day figure on the Insights screen is bucketed
-    /// server-side in this, so it is part of the profile rather than a
-    /// display preference.
+    /// IANA name. Activity is bucketed server-side in this, so it is part of
+    /// the profile rather than a display preference -- leaving it on UTC puts
+    /// someone's evening in the middle of their night.
     let timezone: String
     let isActive: Bool
     let createdAt: Date
