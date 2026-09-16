@@ -101,8 +101,48 @@ class TestSystemTools:
             tools["running_processes"].spec.input_model(), _context()
         )
 
+        # Checked before reading `processes`, so a `ps` invocation that is
+        # not portable fails with the message the tool produced rather than
+        # a KeyError three lines later. This shipped once using BSD-only
+        # flags and passed on macOS while returning nothing on Linux.
+        assert not result.is_error, result.content
         assert result.data["processes"]
         assert all(isinstance(row["pid"], int) for row in result.data["processes"])
+
+    async def test_running_processes_are_sorted_by_cpu(self) -> None:
+        """Sorted in Python, because the flag for it is not portable.
+
+        BSD spells it `-r` and procps spells it `--sort=-pcpu`; either one
+        makes the tool return nothing at all on the other platform.
+        """
+        tools = {tool.spec.name: tool for tool in build_system_tools(ToolSettings())}
+
+        result = await tools["running_processes"].execute(
+            tools["running_processes"].spec.input_model(), _context()
+        )
+
+        usage = [float(row["cpu_percent"]) for row in result.data["processes"]]
+        assert usage == sorted(usage, reverse=True)
+
+    def test_the_process_parser_is_robust_to_what_ps_actually_prints(self) -> None:
+        """Full paths on Linux, and a dash where a percentage cannot be read.
+
+        Both appear on real machines, and a sort that raised on the dash
+        would lose the whole listing rather than one row.
+        """
+        from nova.tools.system import _parse_ps
+
+        rows = _parse_ps(
+            "  PID  %CPU %MEM COMM\n"
+            "    1   0.7  0.1 /sbin/launchd\n"
+            "  530     -  0.1 /usr/libexec/logd\n"
+            "  777  12.5  0.3 postgres\n"
+            "garbage line\n",
+            limit=10,
+        )
+
+        assert [row["name"] for row in rows] == ["postgres", "launchd", "logd"]
+        assert rows[0]["pid"] == 777
 
     async def test_disk_usage_is_confined_to_the_workspace(self, tmp_path: Path) -> None:
         tools = {

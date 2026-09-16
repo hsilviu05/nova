@@ -225,8 +225,15 @@ class RunningProcessesTool(_SystemTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         # A fixed argv with no interpolation: there is nothing here a caller
         # can influence, which is the easiest kind of command to be sure of.
+        #
+        # `-A -o` only, and the sort done in Python. BSD `ps` spells
+        # "sort by CPU" as `-r` and procps spells it `--sort=-pcpu`; using
+        # either makes this tool silently return nothing on the other
+        # platform, which is how it first shipped -- working on the Mac it
+        # was written on and failing on the Linux host the deployment guide
+        # describes.
         result = await run(
-            ["ps", "-Aco", "pid,pcpu,pmem,comm", "-r"],
+            ["ps", "-Ao", "pid,pcpu,pmem,comm"],
             timeout_seconds=self._settings.command_timeout_seconds,
             max_output_bytes=self._settings.max_output_bytes,
         )
@@ -332,7 +339,13 @@ def _macosmemory_usage() -> dict[str, Any] | None:
 
 
 def _parse_ps(output: str, *, limit: int) -> list[dict[str, Any]]:
-    """Turn ``ps`` output into rows, skipping anything that does not parse."""
+    """Turn ``ps`` output into the busiest rows, skipping what does not parse.
+
+    Sorted here rather than by ``ps`` so the command stays portable -- see
+    the note in :class:`RunningProcessesTool`. The whole table is parsed
+    first because the limit applies to the busiest processes, not to
+    whichever ones the kernel happened to list first.
+    """
     rows: list[dict[str, Any]] = []
     for line in output.splitlines()[1:]:
         parts = line.split(None, 3)
@@ -347,12 +360,26 @@ def _parse_ps(output: str, *, limit: int) -> list[dict[str, Any]]:
                 "pid": int(pid),
                 "cpu_percent": cpu,
                 "memory_percent": memory,
-                "name": name.strip(),
+                # `comm` is a full path on Linux and on macOS without -c.
+                # The basename is what a person recognises.
+                "name": name.strip().rsplit("/", 1)[-1],
             }
         )
-        if len(rows) >= limit:
-            break
-    return rows
+
+    rows.sort(key=lambda row: _as_float(row["cpu_percent"]), reverse=True)
+    return rows[:limit]
+
+
+def _as_float(value: Any) -> float:
+    """A percentage from ``ps``, or 0 when it is not a number.
+
+    Some platforms print "-" for a process whose usage cannot be read, and a
+    sort that raised on one of those would lose the whole listing.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _gib(value: int) -> str:
