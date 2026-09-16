@@ -183,3 +183,32 @@ class TestWorkspaceBoundary:
             resolve_workspace_path("/", [])
 
         assert caught.value.code == "tool_no_workspace"
+
+
+class TestRefusalsBeforeAnythingRuns:
+    async def test_an_empty_argv_is_refused_rather_than_spawned(self) -> None:
+        """``create_subprocess_exec()`` with nothing to run raises an
+        IndexError from inside asyncio, which tells nobody anything."""
+        with pytest.raises(ToolError) as caught:
+            await run([], timeout_seconds=5, max_output_bytes=1024)
+
+        assert caught.value.code == "tool_empty_command"
+
+    async def test_terminating_a_process_that_already_exited_does_nothing(self) -> None:
+        """The ordinary case on the timeout path.
+
+        A command that finished between the deadline firing and the signal
+        being sent has no process group left to kill, and signalling a
+        recycled pid would kill something unrelated.
+        """
+        import asyncio
+
+        from nova.tools.process import _terminate
+
+        process = await asyncio.create_subprocess_exec(
+            "/bin/sh", "-c", "exit 0", stdout=asyncio.subprocess.PIPE
+        )
+        await process.wait()
+        assert process.returncode is not None
+
+        await _terminate(process)

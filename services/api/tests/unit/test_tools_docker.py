@@ -87,7 +87,7 @@ class TestStatus:
     async def test_a_daemon_that_is_down_is_a_fact_not_a_fault(
         self, tools: dict[str, Any], context: ToolContext, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """"Docker is not running" is an answer.
+        """ "Docker is not running" is an answer.
 
         Reported as a successful result so NOVA says so plainly, rather than
         as a tool error, which reads to the model as "something broke".

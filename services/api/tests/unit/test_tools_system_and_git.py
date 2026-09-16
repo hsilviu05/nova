@@ -189,9 +189,7 @@ class TestGitStatus:
         assert "clean" in result.content
         assert result.data["files"] == []
 
-    async def test_a_renamed_file_is_reported_by_its_new_name_alone(
-        self, repository: Path
-    ) -> None:
+    async def test_a_renamed_file_is_reported_by_its_new_name_alone(self, repository: Path) -> None:
         """Against real git output, because a fixture proved nothing here.
 
         A "2 " record carries git's similarity score in an extra field ahead

@@ -26,6 +26,10 @@ venv/
 .mypy_cache/
 .ruff_cache/
 .coverage
+# pytest-xdist and interrupted runs leave numbered siblings behind, and a
+# stale one gets combined into the next report.
+.coverage.*
+.coverage[ ]*
 coverage.xml
 htmlcov/
 

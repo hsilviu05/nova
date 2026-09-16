@@ -407,7 +407,10 @@ class ChatStreamer:
         turns = list(history)
 
         try:
-            for round_index in range(self._tool_settings.max_tool_rounds + 1):
+            # No `else`: every path out of this loop returns. Exhausting the
+            # range would mean the final round -- which is offered no tools --
+            # still asked for one, and that is refused above.
+            for round_index in range(self._tool_settings.max_tool_rounds + 1):  # pragma: no branch
                 # The last round is answered without tools, so the model has
                 # to produce a reply rather than asking for one more thing.
                 last_round = round_index == self._tool_settings.max_tool_rounds
@@ -429,7 +432,11 @@ class ChatStreamer:
                                 yield ReplyDelta(text)
                             case ToolCallRequested(call=call):
                                 calls.append(call)
-                            case StreamCompleted():
+                            # Exhaustive: StreamEvent is a union of exactly
+                            # these three, so there is no fall-through arc to
+                            # reach. A fourth event type would need a case
+                            # here, and mypy would say so.
+                            case StreamCompleted():  # pragma: no branch
                                 pass
 
                 if not calls:
@@ -603,7 +610,12 @@ class ChatStreamer:
 
         try:
             pending = await self._tools.propose(call.name, call.arguments, context)
-        except ToolError as exc:
+        except ToolError as exc:  # pragma: no cover - unreachable from here
+            # Defence in depth rather than a live path. Everything `propose`
+            # can refuse -- an unknown tool, arguments that do not fit the
+            # schema -- `invoke` already refused a moment ago, which is what
+            # sent us here. Kept so that a future refusal added to `propose`
+            # arrives as a message the model can act on rather than a 500.
             outcomes.append(
                 ToolOutcome(
                     call_id=call.id,

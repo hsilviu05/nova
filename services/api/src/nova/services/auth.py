@@ -33,6 +33,15 @@ logger = get_logger(__name__)
 # burn CPU and is never compared against a user-supplied credential.
 _TIMING_EQUALISATION_PASSWORD = "nova-timing-equalisation-placeholder"  # noqa: S105
 
+# Process-wide rather than per-service. AuthService is constructed per
+# request, so an instance attribute would be None on every login -- and the
+# equalising path would then cost a hash *plus* a verify while a wrong
+# password costs only a verify. That makes an unknown email reliably slower
+# than a known one, which is precisely the signal this is here to remove.
+# A race between two first logins costs one redundant hash and produces the
+# same value, so it needs no lock.
+_dummy_hash: str | None = None
+
 
 class AuthService:
     """Owns every authentication decision."""
@@ -49,7 +58,6 @@ class AuthService:
         self._refresh_tokens = refresh_tokens
         self._hasher = hasher
         self._tokens = tokens
-        self._dummy_hash: str | None = None
 
     # -- public API -------------------------------------------------------
 
@@ -269,12 +277,17 @@ class AuthService:
         )
 
     async def _equalise_timing(self, password: str) -> None:
-        """Burn the same CPU an unsuccessful verify would."""
-        if self._dummy_hash is None:
-            self._dummy_hash = await asyncio.to_thread(
-                self._hasher.hash, _TIMING_EQUALISATION_PASSWORD
-            )
-        await asyncio.to_thread(self._hasher.verify, password, self._dummy_hash)
+        """Burn the same CPU an unsuccessful verify would.
+
+        An email that does not exist has no hash to check, so without this a
+        login for an unknown account returns as soon as the query does --
+        and the difference is enough to enumerate accounts.
+        """
+        global _dummy_hash
+
+        if _dummy_hash is None:
+            _dummy_hash = await asyncio.to_thread(self._hasher.hash, _TIMING_EQUALISATION_PASSWORD)
+        await asyncio.to_thread(self._hasher.verify, password, _dummy_hash)
 
     @staticmethod
     def _normalise_email(email: str) -> str:

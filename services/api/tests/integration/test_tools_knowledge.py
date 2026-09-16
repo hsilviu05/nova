@@ -292,6 +292,31 @@ class TestForgetting:
 
         assert prompt is None
 
+    async def test_an_id_that_is_not_an_id_produces_no_prompt(
+        self, tools: dict[str, Any], owner: uuid.UUID
+    ) -> None:
+        """A model can invent an id. Describing it must not raise: the
+        refusal belongs to ``execute``, which says what to do about it, and
+        a failure here would turn that into a 500 instead."""
+        tool = tools["memory_delete"]
+
+        prompt = await tool.describe(
+            tool.spec.input_model(memory_id="the one about postgres"), _context(owner)
+        )
+
+        assert prompt is None
+
+    async def test_an_id_that_is_not_an_id_is_refused_with_advice(
+        self, tools: dict[str, Any], owner: uuid.UUID
+    ) -> None:
+        tool = tools["memory_delete"]
+
+        with pytest.raises(ToolError) as caught:
+            await _run(tool, owner, memory_id="the one about postgres")
+
+        assert caught.value.code == "memory_bad_id"
+        assert "memory_search" in str(caught.value)
+
     async def test_forgetting_removes_the_row(
         self, tools: dict[str, Any], owner: uuid.UUID, session_factory: Any
     ) -> None:

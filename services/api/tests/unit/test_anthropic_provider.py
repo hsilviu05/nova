@@ -508,3 +508,41 @@ class TestClosing:
         await provider.aclose()
 
         assert closed == [True]
+
+
+class TestTheSystemPrompt:
+    def test_the_instructions_are_marked_for_caching(self, provider: AnthropicChatProvider) -> None:
+        """The system prompt is long and identical on every turn.
+
+        Marking it ephemeral is what keeps a conversation from paying for it
+        again on each message.
+        """
+        params = provider._build_params(_request())
+
+        system = params["system"]
+        assert system[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_retrieved_context_is_a_second_block_rather_than_appended(
+        self, provider: AnthropicChatProvider
+    ) -> None:
+        """It changes with every turn.
+
+        Concatenating it into the cached block would invalidate the cache on
+        each message, which costs more than the context is worth.
+        """
+        params = provider._build_params(_request(context="The owner drinks coffee black."))
+
+        system = params["system"]
+        assert len(system) == 2
+        assert system[1] == {"type": "text", "text": "The owner drinks coffee black."}
+        assert "cache_control" not in system[1]
+
+    def test_no_context_means_one_block(self, provider: AnthropicChatProvider) -> None:
+        params = provider._build_params(_request(context=None))
+
+        assert len(params["system"]) == 1
+
+    def test_the_adapter_declares_tool_support(self, provider: AnthropicChatProvider) -> None:
+        """What the chat loop branches on before offering the model any
+        tools. An adapter that lied here would have its calls dropped."""
+        assert provider.supports_tools is True

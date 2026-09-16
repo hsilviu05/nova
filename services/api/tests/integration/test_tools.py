@@ -554,6 +554,48 @@ class TestAuditLog:
         assert body["items"][0]["tool_name"] == "echo"
         assert body["items"][0]["status"] == "succeeded"
 
+    async def test_the_feed_can_be_narrowed_to_one_tool(self, tools_client: AsyncClient) -> None:
+        """ "What has NOVA been doing with docker" is the question this
+        answers, and filtering client-side would mean paging through
+        everything else to find out."""
+        headers = await _signed_in(tools_client)
+        for name, arguments in (
+            ("echo", {"text": "one"}),
+            ("leaky", {}),
+            ("echo", {"text": "two"}),
+        ):
+            await tools_client.post(
+                "/api/v1/tools/invoke",
+                headers=headers,
+                json={"name": name, "arguments": arguments},
+            )
+
+        body = (
+            await tools_client.get(
+                "/api/v1/system/activity", headers=headers, params={"tool_name": "echo"}
+            )
+        ).json()
+
+        assert [item["tool_name"] for item in body["items"]] == ["echo", "echo"]
+
+    async def test_a_filter_matching_nothing_is_an_empty_page(
+        self, tools_client: AsyncClient
+    ) -> None:
+        headers = await _signed_in(tools_client)
+        await tools_client.post(
+            "/api/v1/tools/invoke",
+            headers=headers,
+            json={"name": "echo", "arguments": {"text": "one"}},
+        )
+
+        body = (
+            await tools_client.get(
+                "/api/v1/system/activity", headers=headers, params={"tool_name": "demolish"}
+            )
+        ).json()
+
+        assert body["items"] == []
+
     async def test_the_feed_is_scoped_to_the_caller(self, tools_client: AsyncClient) -> None:
         mine = await _signed_in(tools_client)
         theirs = await _signed_in(tools_client)

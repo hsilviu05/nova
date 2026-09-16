@@ -47,19 +47,6 @@ class ConversationRepository(BaseRepository):
 class MessageRepository(BaseRepository):
     """Reads and writes :class:`~nova.models.conversation.Message` rows."""
 
-    async def list_for_conversation(
-        self, conversation_id: uuid.UUID, *, limit: int | None = None
-    ) -> list[Message]:
-        """Oldest first, which is replay order."""
-        stmt = (
-            select(Message)
-            .where(Message.conversation_id == conversation_id)
-            .order_by(Message.created_at)
-        )
-        if limit is not None:
-            stmt = stmt.limit(limit)
-        return list((await self._session.execute(stmt)).scalars().all())
-
     async def list_recent(self, conversation_id: uuid.UUID, *, limit: int) -> list[Message]:
         """The newest ``limit`` messages, returned oldest first.
 

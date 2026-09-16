@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import pytest
@@ -103,6 +104,28 @@ class TestLogin:
         )
         assert response.status_code == 401
         assert response.json()["error"]["code"] == "invalid_credentials"
+
+    async def test_the_equalising_hash_is_computed_once_and_reused(
+        self, client: AsyncClient
+    ) -> None:
+        """Two failed logins for unknown accounts, so the dummy hash is
+        built on the first and reused on the second.
+
+        The point of it is that an unknown email burns the same CPU as a
+        wrong password. Recomputing it each time would be wasteful but
+        correct; not caching it at all would make the *first* unknown-email
+        request measurably slower than the rest, which is its own signal.
+        """
+        for _ in range(2):
+            response = await client.post(
+                "/api/v1/auth/login",
+                json={
+                    "email": f"nobody-{uuid.uuid4().hex[:8]}@example.com",
+                    "password": "correct-horse-battery-staple",
+                },
+            )
+            assert response.status_code == 401
+            assert response.json()["error"]["code"] == "invalid_credentials"
 
     async def test_unknown_email_is_indistinguishable_from_wrong_password(
         self, client: AsyncClient, credentials: dict[str, str], registered: dict[str, Any]

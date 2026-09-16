@@ -118,6 +118,45 @@ class TestUpdateMe:
         )
         assert response.status_code == 422
 
+    async def test_updates_the_timezone(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        """It goes into an ``AT TIME ZONE`` clause, so it is validated here
+        rather than discovered at query time."""
+        response = await client.patch(
+            "/api/v1/users/me", headers=auth_headers, json={"timezone": "Europe/Bucharest"}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["timezone"] == "Europe/Bucharest"
+
+        again = await client.get("/api/v1/users/me", headers=auth_headers)
+        assert again.json()["timezone"] == "Europe/Bucharest"
+
+    async def test_rejects_a_timezone_the_database_cannot_resolve(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = await client.patch(
+            "/api/v1/users/me", headers=auth_headers, json={"timezone": "Mars/Olympus"}
+        )
+
+        assert response.status_code == 422
+
+    async def test_both_fields_at_once(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = await client.patch(
+            "/api/v1/users/me",
+            headers=auth_headers,
+            json={"display_name": "  Ada  ", "timezone": "Asia/Tokyo"},
+        )
+
+        assert response.status_code == 200
+        # Stripped on the way in, so a name with stray padding does not
+        # render as one on the home screen.
+        assert response.json()["display_name"] == "Ada"
+        assert response.json()["timezone"] == "Asia/Tokyo"
+
     async def test_requires_authentication(self, client: AsyncClient) -> None:
         response = await client.patch("/api/v1/users/me", json={"display_name": "Nobody"})
         assert response.status_code == 401

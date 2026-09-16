@@ -319,7 +319,7 @@ class TestStreamedToolCalls:
             [
                 call_fragment(index=0, call_id="a", name="git_status", arguments="{}"),
                 call_fragment(index=1, call_id="b", name="disk_usage", arguments='{"pa'),
-                call_fragment(index=1, arguments='th": "/tmp"}'),
+                call_fragment(index=1, arguments='th": "/srv/data"}'),
                 text_chunk("", finish="tool_calls"),
             ]
         )
@@ -327,7 +327,7 @@ class TestStreamedToolCalls:
             calls = calls_of([e async for e in stream])
 
         assert [c.name for c in calls] == ["git_status", "disk_usage"]
-        assert calls[1].arguments == {"path": "/tmp"}
+        assert calls[1].arguments == {"path": "/srv/data"}
 
     async def test_unparseable_arguments_drop_the_call_rather_than_guess(self) -> None:
         """A tool invoked with silently-missing arguments does something
@@ -527,6 +527,15 @@ class TestEmbeddings:
             **kw,
         )
 
+    async def test_the_embedding_client_is_released(self) -> None:
+        """A separate client from the chat provider's, with its own pool.
+        The lifespan closes both."""
+        embedder = self.embedder(Server(body=b"{}"))
+
+        await embedder.aclose()
+
+        assert embedder._client.is_closed
+
     async def test_vectors_come_back_in_the_order_they_were_asked_for(self) -> None:
         """Ordered by the index the server reports, not by arrival.
 
@@ -601,3 +610,146 @@ class TestIdentity:
     async def test_closing_releases_the_client(self) -> None:
         chat = provider(Server())
         await chat.aclose()
+
+
+class TestFragmentsThatDoNotAddUp:
+    async def test_a_call_that_never_received_a_name_is_dropped(self) -> None:
+        """Fragments arrive out of any order the server likes.
+
+        One that only ever carried arguments cannot be run -- there is no
+        tool to run -- and inventing a name would mean running the wrong one.
+        """
+        server = Server(
+            body=sse(
+                [
+                    call_fragment(index=0, call_id="c1", arguments='{"path":'),
+                    call_fragment(index=0, arguments=' "/repo"}'),
+                    text_chunk("", finish="tool_calls"),
+                ]
+            )
+        )
+
+        async with aclosing(provider(server).stream(REQUEST)) as events:
+            collected = [event async for event in events]
+
+        assert calls_of(collected) == []
+
+    async def test_a_fragment_with_no_index_is_treated_as_the_first_call(self) -> None:
+        """Some servers omit it when there is only one call in flight.
+
+        Dropping the fragment would lose the call entirely; assuming index
+        zero reassembles it, and a server that omits the index is not
+        sending a second call in parallel.
+        """
+        server = Server(
+            body=sse(
+                [
+                    {
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "id": "c1",
+                                            "function": {
+                                                "name": "git_status",
+                                                "arguments": "{}",
+                                            },
+                                        }
+                                    ]
+                                },
+                            }
+                        ]
+                    },
+                    text_chunk("", finish="tool_calls"),
+                ]
+            )
+        )
+
+        async with aclosing(provider(server).stream(REQUEST)) as events:
+            collected = [event async for event in events]
+
+        assert [call.name for call in calls_of(collected)] == ["git_status"]
+
+    async def test_a_tool_call_fragment_that_is_not_an_object_is_skipped(self) -> None:
+        server = Server(
+            body=sse(
+                [
+                    {"choices": [{"index": 0, "delta": {"tool_calls": ["not an object"]}}]},
+                    text_chunk("still here", finish="stop"),
+                ]
+            )
+        )
+
+        async with aclosing(provider(server).stream(REQUEST)) as events:
+            collected = [event async for event in events]
+
+        assert text_of(collected) == ["still here"]
+        assert calls_of(collected) == []
+
+    async def test_a_chunk_whose_delta_is_not_an_object_is_skipped(self) -> None:
+        """A keep-alive frame, or a server reporting a choice with no delta
+        at all. Indexing it would raise inside the stream."""
+        server = Server(
+            body=sse(
+                [
+                    {"choices": [{"index": 0, "delta": None, "finish_reason": None}]},
+                    text_chunk("hi", finish="stop"),
+                ]
+            )
+        )
+
+        async with aclosing(provider(server).stream(REQUEST)) as events:
+            collected = [event async for event in events]
+
+        assert text_of(collected) == ["hi"]
+
+    async def test_a_stream_that_ends_without_the_done_sentinel_still_completes(self) -> None:
+        """A server that closes the connection rather than sending [DONE].
+
+        The assembled tool calls have to be emitted anyway, or a reply that
+        asked to run something would silently do nothing.
+        """
+        server = Server(
+            body=sse(
+                [
+                    call_fragment(index=0, call_id="c1", name="git_status", arguments="{}"),
+                    text_chunk("", finish="tool_calls"),
+                ],
+                terminate=False,
+            )
+        )
+
+        async with aclosing(provider(server).stream(REQUEST)) as events:
+            collected = [event async for event in events]
+
+        assert [call.name for call in calls_of(collected)] == ["git_status"]
+        assert isinstance(collected[-1], StreamCompleted)
+
+    async def test_a_non_streamed_call_with_no_name_is_dropped(self) -> None:
+        """The same rule on the ``complete`` path, where the whole message
+        arrives at once."""
+        server = Server(
+            body=json.dumps(
+                {
+                    "model": "local-model",
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [
+                                    {"id": "c1", "type": "function", "function": {"name": ""}}
+                                ],
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ],
+                }
+            ).encode()
+        )
+
+        completion = await provider(server).complete(REQUEST)
+
+        assert completion.tool_calls == ()

@@ -161,6 +161,16 @@ concurrency = ["greenlet", "thread"]
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
+# Every statement in src/nova is executed by the suite. The floor is 99
+# rather than 100 because two branch arcs -- the natural exit of the
+# candidate loop in services/memory.py and the fall-through after a
+# `confirm` event in api/v1/conversations.py -- are recorded when their
+# tests run alone and dropped when the whole suite runs. Both are
+# exercised; `concurrency = ["greenlet", "thread"]` above is the cost of
+# measuring anything at all through SQLAlchemy's asyncio layer, and losing
+# the occasional arc is part of that cost. A real regression takes the
+# number well below this.
+fail_under = 99
 exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",

@@ -506,6 +506,7 @@ class TestResources:
     ) -> None:
         """Zero would be read as "no memory in use", which is a worse answer
         than "I cannot tell"."""
+
         async def unreadable() -> None:
             return None
 

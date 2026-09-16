@@ -135,6 +135,16 @@ class TestParsing:
         candidates = parse_candidates(json.dumps([_element(content="  Runs\n\n  at   six  ")]))
         assert candidates[0].content == "Runs at six"
 
+    def test_fewer_than_the_cap_are_all_kept(self) -> None:
+        """The loop has to finish rather than stopping at the cap.
+
+        A cap applied by breaking on equality would drop the last candidate
+        of an exchange that produced exactly one fewer.
+        """
+        raw = json.dumps([_element(content=f"Fact number {n}") for n in range(3)])
+
+        assert len(parse_candidates(raw)) == 3
+
     def test_caps_how_many_come_from_one_exchange(self) -> None:
         raw = json.dumps([_element(content=f"Fact number {n}") for n in range(20)])
         assert len(parse_candidates(raw)) == MAX_MEMORIES_PER_EXCHANGE
@@ -311,3 +321,37 @@ class TestLexicalEmbeddings:
         for text in ["", "   ", "the and of it"]:
             vector = (await LexicalEmbeddingProvider(dimensions=256).embed([text]))[0]
             assert not any(vector)
+
+    async def test_without_ngrams_only_whole_words_are_features(self) -> None:
+        """The character n-grams are what make a near-miss match at all.
+
+        Turned off, "Postgres" and "PostgreSQL" share no feature and score
+        zero -- which is the comparison that shows the n-grams are doing
+        something rather than being noise.
+        """
+        plain = LexicalEmbeddingProvider(dimensions=256, use_ngrams=False)
+        with_ngrams = LexicalEmbeddingProvider(dimensions=256, use_ngrams=True)
+
+        exact, near = await plain.embed(["postgres database", "postgresql database"])
+        fuzzy_exact, fuzzy_near = await with_ngrams.embed(
+            ["postgres database", "postgresql database"]
+        )
+
+        assert cosine_similarity(exact, near) < cosine_similarity(fuzzy_exact, fuzzy_near)
+
+    async def test_without_ngrams_the_same_text_still_matches_itself(self) -> None:
+        provider = LexicalEmbeddingProvider(dimensions=256, use_ngrams=False)
+
+        first, second = await provider.embed(["the disk is full", "the disk is full"])
+
+        assert cosine_similarity(first, second) == pytest.approx(1.0)
+
+    async def test_a_word_shorter_than_an_ngram_is_kept_whole(self) -> None:
+        """Otherwise "db" and "ci" would contribute nothing at all, and a
+        memory about one of them would be unretrievable."""
+        provider = LexicalEmbeddingProvider(dimensions=256)
+
+        about_db, about_ci = await provider.embed(["db is slow", "ci is slow"])
+
+        assert cosine_similarity(about_db, about_ci) < 1.0
+        assert any(value != 0.0 for value in about_db)

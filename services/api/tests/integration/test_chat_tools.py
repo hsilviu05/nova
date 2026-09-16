@@ -16,6 +16,7 @@ What is being pinned down:
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -589,3 +590,114 @@ class TestHostileToolOutput:
             await _stream(client, headers, cid, "Show me the config")
 
         assert "ghp_abcdef" not in str(provider.requests[1].messages)
+
+
+class TestTwoDestructiveCallsInOneTurn:
+    async def test_each_one_becomes_its_own_confirmation(
+        self,
+        registry: ToolRegistry,
+        wipe_tool: WipeTool,
+        settings: Settings,
+        engine: Any,
+        session_factory: Any,
+        redis_client: Any,
+    ) -> None:
+        """A model can ask for several things at once.
+
+        Each needs its own token, because a token is bound to one tool and
+        one set of arguments -- approving "wipe staging" must not approve
+        "wipe production" that arrived in the same breath.
+        """
+        provider = ScriptedProvider(
+            [
+                (
+                    "Cleaning up.",
+                    [_call("wipe", target="staging"), _call("wipe", target="production")],
+                )
+            ]
+        )
+
+        async with _client(
+            provider, registry, settings, engine, session_factory, redis_client
+        ) as client:
+            headers, cid = await _conversation(client)
+            body = await _stream(client, headers, cid, "wipe both")
+
+        assert body.count("event: confirm") == 2
+        tokens = re.findall(r'"confirmation_token":"([^"]+)"', body)
+        assert len(tokens) == 2
+        assert tokens[0] != tokens[1]
+        assert "staging" in body
+        assert "production" in body
+        assert wipe_tool.wiped == []
+
+
+class TestAProviderThatKeepsTalking:
+    async def test_events_after_the_completion_event_do_not_break_the_turn(
+        self,
+        registry: ToolRegistry,
+        settings: Settings,
+        engine: Any,
+        session_factory: Any,
+        redis_client: Any,
+    ) -> None:
+        """``StreamCompleted`` is a marker, not a close.
+
+        A provider that emits it and then keeps going -- which a badly
+        behaved adapter can -- must not make the loop drop what follows or
+        treat the turn as two.
+        """
+
+        class ChattyProvider(ScriptedProvider):
+            async def stream(self, request: ChatRequest) -> AsyncGenerator[StreamEvent, None]:
+                self.requests.append(request)
+                yield TextDelta("first ")
+                yield StreamCompleted(stop_reason="end_turn", usage=TokenUsage(), model=self.model)
+                yield TextDelta("and second.")
+
+        provider = ChattyProvider([])
+
+        async with _client(
+            provider, registry, settings, engine, session_factory, redis_client
+        ) as client:
+            headers, cid = await _conversation(client)
+            body = await _stream(client, headers, cid, "hello")
+
+        assert "first " in body
+        assert "and second." in body
+
+
+class TestAToolThatRefusesMidLoop:
+    async def test_the_refusal_is_reported_and_the_loop_carries_on(
+        self,
+        status_tool: StatusTool,
+        registry: ToolRegistry,
+        settings: Settings,
+        engine: Any,
+        session_factory: Any,
+        redis_client: Any,
+    ) -> None:
+        """A tool raising is not the end of the turn.
+
+        NOVA reports what failed and lets the model answer around it, which
+        is the difference between "Docker is not running" and a blank reply.
+        """
+        from nova.tools.errors import ToolError
+
+        async def refuse(arguments: BaseModel, context: ToolContext) -> ToolResult:
+            raise ToolError("That service is not configured.", code="project_unknown")
+
+        status_tool.execute = refuse  # type: ignore[method-assign]
+
+        provider = ScriptedProvider([("Checking.", [_call("service_status", service="nope")])])
+
+        async with _client(
+            provider, registry, settings, engine, session_factory, redis_client
+        ) as client:
+            headers, cid = await _conversation(client)
+            body = await _stream(client, headers, cid, "is nope up?")
+
+        assert '"is_error":true' in body
+        assert "That service is not configured." in body
+        # And the model got a turn after it, rather than the stream ending.
+        assert "All done." in body
