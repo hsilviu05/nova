@@ -30,19 +30,30 @@ struct ChatStreamClient: Sendable {
     private let tokens: TokenStore
     private let session: URLSession
 
-    init(configuration: APIConfiguration, tokens: TokenStore) {
+    /// - Parameter session: injectable for the same reason `APIClient`'s is:
+    ///   the parsing below is the part worth testing, and testing it against
+    ///   a real server would make it a test of the server.
+    init(
+        configuration: APIConfiguration,
+        tokens: TokenStore,
+        session: URLSession? = nil
+    ) {
         self.configuration = configuration
         self.tokens = tokens
 
-        let config = URLSessionConfiguration.ephemeral
-        // No short overall timeout: a reply legitimately takes as long as the
-        // model takes to think, and a local model on a laptop that has just
-        // woken up is slow before it is fast. The per-resource timeout is
-        // what catches a genuinely dead connection.
-        config.timeoutIntervalForRequest = 180
-        config.timeoutIntervalForResource = 900
-        config.waitsForConnectivity = false
-        self.session = URLSession(configuration: config)
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.ephemeral
+            // No short overall timeout: a reply legitimately takes as long as
+            // the model takes to think, and a local model on a laptop that
+            // has just woken up is slow before it is fast. The per-resource
+            // timeout is what catches a genuinely dead connection.
+            config.timeoutIntervalForRequest = 180
+            config.timeoutIntervalForResource = 900
+            config.waitsForConnectivity = false
+            self.session = URLSession(configuration: config)
+        }
     }
 
     /// Send a message and stream the reply.
@@ -110,31 +121,50 @@ struct ChatStreamClient: Sendable {
         var eventName = ""
         var data = ""
 
+        func flush() {
+            if let event = Self.parse(name: eventName, data: data) {
+                continuation.yield(event)
+            }
+            eventName = ""
+            data = ""
+        }
+
         for try await line in bytes.lines {
-            if line.isEmpty {
-                // A blank line terminates an event.
-                if let event = Self.parse(name: eventName, data: data) {
-                    continuation.yield(event)
-                }
-                eventName = ""
-                data = ""
-            } else if let value = line.dropPrefix("event: ") {
+            if let value = line.dropPrefix("event: ") {
+                // The start of the next event ends the one before it.
+                //
+                // SSE separates events with a blank line, and this used to
+                // rely on that alone -- but `AsyncLineSequence` does not
+                // yield empty lines, so the blank line never arrived and the
+                // whole reply collapsed into whichever event happened to be
+                // last. No deltas, no tool rows, and a `confirm` that never
+                // reached the sheet.
+                flush()
                 eventName = value
             } else if let value = line.dropPrefix("data: ") {
                 data = value
+            } else if line.isEmpty {
+                // Kept because it is what the protocol actually says, and
+                // because a future Foundation that starts yielding blank
+                // lines should not change the result. Flushing twice is
+                // harmless: the second call has nothing to parse.
+                flush()
             }
             // Anything else (comments, retry hints) is ignored by design.
         }
 
-        // A stream that ends without its terminator was cut short. The
-        // server has already stored whatever it produced, so this is not an
-        // error worth surfacing -- the UI simply stops receiving deltas.
-        if let event = Self.parse(name: eventName, data: data) {
-            continuation.yield(event)
-        }
+        // The last event, and the only one on a stream cut short. A stream
+        // that ends without its terminator is not an error worth surfacing:
+        // the server has already stored whatever it produced, and the UI
+        // simply stops receiving deltas.
+        flush()
     }
 
-    private static func parse(name: String, data: String) -> ChatStreamEvent? {
+    /// Turn one complete SSE event into something the UI can render.
+    ///
+    /// Not private: the event vocabulary is a contract with the server, and
+    /// the tests assert on it directly rather than through a fake socket.
+    static func parse(name: String, data: String) -> ChatStreamEvent? {
         guard !name.isEmpty, let payload = data.data(using: .utf8) else {
             return nil
         }
