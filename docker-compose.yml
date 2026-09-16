@@ -23,7 +23,9 @@ services:
       # Deterministic collation so ordering matches across machines and CI.
       POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=en-US"
     ports:
-      - "${NOVA_POSTGRES_PORT:-5432}:5432"
+      # Loopback only. Postgres has a password; Redis has none. Neither
+      # belongs on the LAN, and a laptop on café wifi is on a LAN.
+      - "127.0.0.1:${NOVA_POSTGRES_PORT:-5432}:5432"
     volumes:
       - nova-pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -40,7 +42,7 @@ services:
     # entry that is cheap to rebuild.
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
-      - "${NOVA_REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${NOVA_REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -72,13 +74,18 @@ services:
       NOVA_OBSERVABILITY__LOG_LEVEL: ${NOVA_OBSERVABILITY__LOG_LEVEL:-INFO}
       NOVA_OBSERVABILITY__LOG_JSON: ${NOVA_OBSERVABILITY__LOG_JSON:-true}
 
-      # The model runs on the host, not in a container. NOVA is meant to use
-      # whatever Ollama the machine already has, with its models already
-      # pulled -- shipping a second one inside Compose would download
-      # gigabytes to a volume nobody knew about.
+      # AI. Forwarded explicitly: the container has no .env, so a value set
+      # there reaches the API only through this list.
+      #
+      # Ollama runs natively on the host, never in this stack -- a container
+      # cannot reach the GPU on macOS, and shipping a second Ollama here
+      # would download gigabytes into a volume nobody knew about.
+      # host.docker.internal is Docker's name for the host; extra_hosts below
+      # makes it resolve on Linux too.
       NOVA_AI__CHAT_PROVIDER: ${NOVA_AI__CHAT_PROVIDER:-offline}
-      NOVA_AI__CHAT_MODEL: ${NOVA_AI__CHAT_MODEL:-qwen3.8:latest}
+      NOVA_AI__CHAT_MODEL: ${NOVA_AI__CHAT_MODEL:-qwen2.5:7b}
       NOVA_AI__OLLAMA_BASE_URL: ${NOVA_AI__OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      NOVA_AI__OLLAMA_KEEP_ALIVE: ${NOVA_AI__OLLAMA_KEEP_ALIVE:-30m}
       NOVA_AI__ANTHROPIC_API_KEY: ${NOVA_AI__ANTHROPIC_API_KEY:-}
 
       # Capabilities. Everything that reaches outside the API process stays

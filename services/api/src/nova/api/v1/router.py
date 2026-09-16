@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from nova.api.v1 import (
     auth,
     conversations,
+    integrations,
     memories,
     system,
     tools,
@@ -23,3 +24,7 @@ router.include_router(memories.router)
 # of actions and the other is a view of state.
 router.include_router(tools.router)
 router.include_router(system.router)
+# GitHub reaches inward rather than being polled: a signed webhook telling
+# NOVA a build finished. The device socket that used to carry the reaction is
+# gone, so the result lands in the activity feed instead.
+router.include_router(integrations.router)

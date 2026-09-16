@@ -39,7 +39,11 @@ class ConversationRead(BaseModel):
 
 
 class ConversationDetail(ConversationRead):
-    """A thread with its messages, oldest first."""
+    """A thread with its newest messages, oldest first.
+
+    ``messages`` is capped at the newest 200; ``message_count`` is the real
+    total, so ``len(messages) < message_count`` means older ones were left out.
+    """
 
     messages: list[MessageRead] = Field(default_factory=list)
 

@@ -392,8 +392,11 @@ services/api/        FastAPI backend
   alembic/             migrations
   tests/               unit and integration
 
+ml/                  dataset, features, split and training -- dormant, see below
+deploy/              single-host production: Caddy, backups, release images
 docs/decisions/      architecture decision records, including superseded ones
-scripts/             contract checks and dependency auditing
+docs/                security review, performance numbers, deployment guide
+scripts/             contract checks, load check, dependency auditing
 ```
 
 ---
@@ -453,6 +456,9 @@ shell access, multi-agent orchestration, Kubernetes, public deployment.
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Setup, migrations, testing, troubleshooting |
 | [SECURITY.md](SECURITY.md) | Threat model, what is implemented, what is not |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Commits, branches, standards |
+| [docs/security-review.md](docs/security-review.md) | Self-review findings; predates the tool system |
+| [docs/performance.md](docs/performance.md) | What was measured, before and after |
+| [docs/deployment.md](docs/deployment.md) | Single-host production: TLS, release images, backups |
 | [docs/decisions/](docs/decisions/) | ADRs, including the ones this refactor superseded |
 
 ---

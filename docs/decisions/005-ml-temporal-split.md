@@ -1,6 +1,6 @@
 # 005 — Temporal splits for behavioural machine learning
 
-**Status:** ~~Superseded by [015](015-iphone-terminal.md)~~ · **Date:** 2026-09-06 · **Superseded:** 2026-09-16
+**Status:** ~~Superseded by [015](019-iphone-terminal.md)~~ · **Date:** 2026-09-06 · **Superseded:** 2026-09-16
 
 > The behavioural ML pipeline this governs had device telemetry as its
 > only data source, and that source is gone. Nothing replaced it: NOVA no

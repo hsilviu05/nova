@@ -1,6 +1,6 @@
 # 012 — Aggregation in SQL, and insights that refuse to guess
 
-**Status:** ~~Superseded by [015](015-iphone-terminal.md)~~ · **Date:** 2026-09-06 · **Superseded:** 2026-09-16
+**Status:** ~~Superseded by [015](019-iphone-terminal.md)~~ · **Date:** 2026-09-06 · **Superseded:** 2026-09-16
 
 > The analytics this describes aggregated device telemetry, which no
 > longer exists. Two of its conclusions were carried forward rather than

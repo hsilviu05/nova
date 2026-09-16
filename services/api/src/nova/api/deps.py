@@ -24,12 +24,14 @@ from nova.core.security import PasswordHasher, TokenService
 from nova.db.session import session_scope
 from nova.models.user import User
 from nova.repositories.conversation import ConversationRepository, MessageRepository
+from nova.repositories.github_integration import GitHubIntegrationRepository
 from nova.repositories.memory import MemoryRepository
 from nova.repositories.refresh_token import RefreshTokenRepository
 from nova.repositories.tool_invocation import ToolInvocationRepository
 from nova.repositories.user import UserRepository
 from nova.services.auth import AuthService
 from nova.services.conversation import ChatStreamer, ConversationService
+from nova.services.github_integration import GitHubIntegrationService
 from nova.services.health import HealthService
 from nova.services.memory import MemoryExtractor, MemoryRecorder, MemoryService
 from nova.services.rate_limit import RateLimiter
@@ -150,6 +152,26 @@ def get_tool_service(
         settings=settings.tools,
         redis=redis,
         session_factory=request.app.state.session_factory,
+    )
+
+
+# -- GitHub dev mode ------------------------------------------------------------
+
+
+def get_github_integration_repository(session: SessionDep) -> GitHubIntegrationRepository:
+    return GitHubIntegrationRepository(session)
+
+
+def get_github_integration_service(
+    request: Request,
+    integrations: Annotated[
+        GitHubIntegrationRepository, Depends(get_github_integration_repository)
+    ],
+) -> GitHubIntegrationService:
+    return GitHubIntegrationService(
+        integrations=integrations,
+        redis=get_redis(request),
+        settings=get_app_settings(request),
     )
 
 

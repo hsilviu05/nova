@@ -37,7 +37,7 @@ telemetry as its only data source.
 Kept: authentication, conversations, streaming, semantic memory, the provider
 abstraction, and the SwiftUI client.
 
-Added: a permissioned tool system ([013](013-tool-system-and-permissions.md)),
+Added: a permissioned tool system ([013](017-tool-system-and-permissions.md)),
 local model providers, a dashboard, an audit log.
 
 ### Concepts were migrated, not deleted

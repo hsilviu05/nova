@@ -7,6 +7,7 @@ HTTP to these calls.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 from sqlalchemy.exc import IntegrityError
@@ -74,9 +75,13 @@ class AuthService:
                 code="email_already_registered",
             )
 
+        # Argon2 is deliberately slow and would hold the event loop for the
+        # whole hash, stalling every other request on this worker. argon2-cffi
+        # releases the GIL, so a thread runs it truly in parallel.
+        password_hash = await asyncio.to_thread(self._hasher.hash, password)
         user = User(
             email=normalised,
-            password_hash=self._hasher.hash(password),
+            password_hash=password_hash,
             display_name=display_name.strip(),
             last_login_at=utc_now(),
         )
@@ -116,11 +121,11 @@ class AuthService:
         user = await self._users.get_by_email(normalised)
 
         if user is None:
-            self._equalise_timing(password)
+            await self._equalise_timing(password)
             logger.info("login_failed", reason="unknown_email")
             raise self._invalid_credentials()
 
-        if not self._hasher.verify(password, user.password_hash):
+        if not await asyncio.to_thread(self._hasher.verify, password, user.password_hash):
             logger.info("login_failed", reason="bad_password", user_id=str(user.id))
             raise self._invalid_credentials()
 
@@ -130,7 +135,7 @@ class AuthService:
 
         # Opportunistically upgrade hashes written under older work factors.
         if self._hasher.needs_rehash(user.password_hash):
-            user.password_hash = self._hasher.hash(password)
+            user.password_hash = await asyncio.to_thread(self._hasher.hash, password)
             logger.info("password_hash_upgraded", user_id=str(user.id))
 
         user.last_login_at = utc_now()
@@ -263,11 +268,13 @@ class AuthService:
             expires_in=int((access.expires_at - utc_now()).total_seconds()),
         )
 
-    def _equalise_timing(self, password: str) -> None:
+    async def _equalise_timing(self, password: str) -> None:
         """Burn the same CPU an unsuccessful verify would."""
         if self._dummy_hash is None:
-            self._dummy_hash = self._hasher.hash(_TIMING_EQUALISATION_PASSWORD)
-        self._hasher.verify(password, self._dummy_hash)
+            self._dummy_hash = await asyncio.to_thread(
+                self._hasher.hash, _TIMING_EQUALISATION_PASSWORD
+            )
+        await asyncio.to_thread(self._hasher.verify, password, self._dummy_hash)
 
     @staticmethod
     def _normalise_email(email: str) -> str:

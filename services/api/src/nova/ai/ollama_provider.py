@@ -34,7 +34,7 @@ from nova.ai.base import (
     ToolCall,
     ToolCallRequested,
 )
-from nova.ai.errors import AIProviderError, AIUnavailableError
+from nova.ai.errors import AIConfigurationError, AIProviderError, AIUnavailableError
 from nova.core.logging import get_logger
 from nova.tools.safety import wrap_tool_output
 
@@ -50,8 +50,17 @@ class OllamaChatProvider:
         base_url: str,
         model: str,
         timeout_seconds: float = 60.0,
+        keep_alive: str = "30m",
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
+        if not model:
+            # Caught here rather than on the first request: an empty model is
+            # a configuration mistake, and Ollama's own error for it is
+            # opaque.
+            raise AIConfigurationError("No Ollama model configured.", code="ai_missing_model")
+
         self._model = model
+        self._keep_alive = keep_alive
         self._base_url = base_url.rstrip("/")
         # No overall read timeout: a local model legitimately takes as long
         # as it takes to think, and there is no bill running. Connect and
@@ -59,6 +68,7 @@ class OllamaChatProvider:
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
             timeout=httpx.Timeout(timeout_seconds, read=None),
+            transport=transport,
         )
 
     @property
@@ -96,12 +106,16 @@ class OllamaChatProvider:
 
                     try:
                         frame = json.loads(line)
-                    except json.JSONDecodeError:
-                        # A truncated frame is not a reply. Skipping is
-                        # right: the stream continues, and the alternative
-                        # is failing a whole answer over one bad line.
+                    except json.JSONDecodeError as exc:
+                        # Not skipped. A dropped frame means NOVA says
+                        # something other than what the model said, and a
+                        # reply silently missing a sentence is worse than a
+                        # reply that failed.
                         logger.warning("ollama_unparseable_frame", length=len(line))
-                        continue
+                        raise AIProviderError(
+                            "The local model server sent a malformed frame.",
+                            code="ai_malformed_stream",
+                        ) from exc
 
                     for event in self._events_from(frame):
                         yield event
@@ -158,11 +172,14 @@ class OllamaChatProvider:
         return events
 
     def _build_payload(self, request: ChatRequest, *, stream: bool) -> dict[str, Any]:
-        messages: list[dict[str, Any]] = [{"role": "system", "content": request.system}]
+        # One system message, persona first and byte-identical every turn,
+        # with the volatile context appended. A second system turn would
+        # preserve the same cacheable prefix, but some models handle only
+        # one and quietly ignore or merge the rest.
+        system = request.system
         if request.context:
-            # A second system turn rather than an appendix to the first, so
-            # the stable half stays byte-identical across turns.
-            messages.append({"role": "system", "content": request.context})
+            system = f"{system}\n\n{request.context}"
+        messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
 
         for message in request.messages:
             messages.extend(_as_ollama_messages(message))
@@ -172,6 +189,10 @@ class OllamaChatProvider:
             "messages": messages,
             "stream": stream,
             "options": {"num_predict": request.max_tokens},
+            # Ollama unloads an idle model after five minutes by default. A
+            # terminal is talked to sporadically, so that default would put a
+            # cold load of several gigabytes in front of most replies.
+            "keep_alive": self._keep_alive,
         }
         if request.tools:
             payload["tools"] = [
@@ -187,8 +208,7 @@ class OllamaChatProvider:
             ]
         return payload
 
-    @staticmethod
-    async def _raise_for_status(response: httpx.Response) -> None:
+    async def _raise_for_status(self, response: httpx.Response) -> None:
         if response.is_success:
             return
 
@@ -198,7 +218,19 @@ class OllamaChatProvider:
         body = await response.aread()
         detail = body.decode("utf-8", "replace")[:300]
         logger.warning("ollama_error", status=response.status_code, detail=detail)
-        raise AIUnavailableError(
+
+        if response.status_code == 404:
+            # The model is not on this machine. An operator fixes that with
+            # one command, so the message carries it -- unlike an outage,
+            # which is nobody's fault and nothing to act on.
+            raise AIConfigurationError(
+                f"Ollama does not have {self._model}. Run: ollama pull {self._model}",
+                code="ai_model_not_pulled",
+            )
+        if response.status_code in (429, 503):
+            raise AIUnavailableError("The local model server is busy.", code="ai_local_model_busy")
+
+        raise AIProviderError(
             f"The local model server answered {response.status_code}. {detail}".strip(),
             code="ai_local_model_error",
         )

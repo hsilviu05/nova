@@ -147,6 +147,16 @@ enumerated rather than wildcarded.
 The API image runs as a non-root user (uid 10001). The build toolchain lives
 in a separate builder stage and never reaches the runtime image.
 
+### Production guardrails
+
+In production the settings layer refuses to start with debug on, a CORS or
+Host wildcard, a non-HTTPS public URL, SQL echo, JSON logging off, or the
+placeholder JWT secret from CI. Every response carries `Cache-Control:
+no-store`, `nosniff`, `X-Frame-Options: DENY`, a no-referrer policy and a
+denying `Permissions-Policy`; HSTS is added only on requests that arrived
+over HTTPS. Request bodies are capped at 1 MiB. The details and the
+verification are in [docs/security-review.md](docs/security-review.md).
+
 ## The tool system
 
 ### What NOVA can do at all
@@ -447,4 +457,8 @@ marketing.
 - **TLS termination guidance** for a Mac mini left running as a server.
 - **Webhook verification** with constant-time comparison, when anything pushes
   to NOVA rather than being polled.
-- **A formal threat-model review** once the tool surface stops moving.
+- **A formal threat-model review** once the tool surface stops moving. The
+  existing self-review, its findings and what was left undone are in
+  [docs/security-review.md](docs/security-review.md); it predates the tool
+  system, so everything above about capability and confirmation is outside
+  what it covered. No external penetration test has been made.

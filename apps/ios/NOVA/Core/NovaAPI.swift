@@ -35,6 +35,15 @@ protocol NovaAPI: Sendable {
     func invokeTool(
         _ name: String, arguments: [String: String], confirmationToken: String?
     ) async throws -> ToolRunResult
+
+    // GitHub dev mode. The webhook reaches inward rather than being polled,
+    // so these only manage the integration; what a delivery leaves behind is
+    // read from `lastEvent` on the integration itself.
+    func githubIntegration() async throws -> GitHubIntegration
+    func connectGitHub(repository: String?) async throws -> GitHubIntegrationCreated
+    func updateGitHubIntegration(repository: String?, enabled: Bool?) async throws
+        -> GitHubIntegration
+    func disconnectGitHub() async throws
 }
 
 /// `NovaAPI` over HTTP.
@@ -239,5 +248,39 @@ struct LiveNovaAPI: NovaAPI {
                 timeout: 45
             )
         )
+    }
+
+    // MARK: - GitHub dev mode
+
+    func githubIntegration() async throws -> GitHubIntegration {
+        try await client.send(Request(method: .get, path: "integrations/github"))
+    }
+
+    /// The only call that returns the secret. Show it, let the user copy it,
+    /// and do not keep it anywhere.
+    func connectGitHub(repository: String?) async throws -> GitHubIntegrationCreated {
+        try await client.send(
+            Request(
+                method: .post,
+                path: "integrations/github",
+                body: CreateGitHubIntegrationRequest(repository: repository)
+            )
+        )
+    }
+
+    func updateGitHubIntegration(
+        repository: String?, enabled: Bool?
+    ) async throws -> GitHubIntegration {
+        try await client.send(
+            Request(
+                method: .patch,
+                path: "integrations/github",
+                body: UpdateGitHubIntegrationRequest(repository: repository, enabled: enabled)
+            )
+        )
+    }
+
+    func disconnectGitHub() async throws {
+        try await client.send(Request(method: .delete, path: "integrations/github"))
     }
 }

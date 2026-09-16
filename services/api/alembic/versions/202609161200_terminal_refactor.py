@@ -12,7 +12,7 @@ not restore the rows: the data went with the tables, and pretending otherwise
 in a docstring would be worse than saying so here.
 
 Revision ID: 4f0c1ab7d9e2
-Revises: d5949ac01523
+Revises: a3f9c2d1b7e4
 Create Date: 2026-09-16
 """
 
@@ -23,7 +23,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "4f0c1ab7d9e2"
-down_revision: str | None = "d5949ac01523"
+down_revision: str | None = "a3f9c2d1b7e4"
 branch_labels: str | None = None
 depends_on: str | None = None
 
@@ -89,25 +89,15 @@ def upgrade() -> None:
         unique=False,
     )
 
-    # Dropped children first: telemetry, credentials and claims all reference
+    # Children first: telemetry, credentials and claims all reference
     # devices, and Postgres will not drop a table another still points at.
-    op.drop_index("ix_device_telemetry_device_id_recorded_at", table_name="device_telemetry")
-    op.drop_index("ix_device_telemetry_event_type", table_name="device_telemetry")
-    op.drop_index("ix_device_telemetry_device_id", table_name="device_telemetry")
+    #
+    # The indexes are not named. DROP TABLE takes them with it, and naming
+    # them would couple this migration to exactly which indexes existed --
+    # which the telemetry-index migration immediately before it changed.
     op.drop_table("device_telemetry")
-
-    op.drop_index("ix_device_claims_provisioning_token_hash", table_name="device_claims")
-    op.drop_index("ix_device_claims_code_hash", table_name="device_claims")
-    op.drop_index("ix_device_claims_device_id", table_name="device_claims")
     op.drop_table("device_claims")
-
-    op.drop_index("ix_device_credentials_device_id_active", table_name="device_credentials")
-    op.drop_index("ix_device_credentials_token_hash", table_name="device_credentials")
-    op.drop_index("ix_device_credentials_device_id", table_name="device_credentials")
     op.drop_table("device_credentials")
-
-    op.drop_index("ix_devices_hardware_id", table_name="devices")
-    op.drop_index("ix_devices_user_id", table_name="devices")
     op.drop_table("devices")
 
 
@@ -268,16 +258,20 @@ def downgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_device_telemetry")),
     )
-    op.create_index(
-        op.f("ix_device_telemetry_device_id"), "device_telemetry", ["device_id"], unique=False
-    )
-    op.create_index(
-        op.f("ix_device_telemetry_event_type"), "device_telemetry", ["event_type"], unique=False
-    )
+    # As the table stood after the telemetry-index migration this one now
+    # follows: one composite index, not the two single-column ones it
+    # replaced. Recreating the older shape here would leave a downgrade in a
+    # state its own predecessor had already moved past.
     op.create_index(
         "ix_device_telemetry_device_id_recorded_at",
         "device_telemetry",
         ["device_id", "recorded_at"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_device_telemetry_device_id_event_type_recorded_at",
+        "device_telemetry",
+        ["device_id", "event_type", "recorded_at"],
         unique=False,
     )
 

@@ -227,6 +227,10 @@ private final class StubAPI: NovaAPI {
     nonisolated func systemStatus() async throws -> SystemStatus { throw APIError.unauthenticated }
     nonisolated func activity(limit: Int) async throws -> ActivityPage { throw APIError.unauthenticated }
     nonisolated func tools() async throws -> ToolList { throw APIError.unauthenticated }
+    nonisolated func githubIntegration() async throws -> GitHubIntegration { throw APIError.unauthenticated }
+    nonisolated func connectGitHub(repository: String?) async throws -> GitHubIntegrationCreated { throw APIError.unauthenticated }
+    nonisolated func updateGitHubIntegration(repository: String?, enabled: Bool?) async throws -> GitHubIntegration { throw APIError.unauthenticated }
+    nonisolated func disconnectGitHub() async throws {}
 }
 
 /// A stream client that is never actually driven.

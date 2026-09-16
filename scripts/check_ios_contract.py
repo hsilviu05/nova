@@ -46,6 +46,8 @@ MODELS = {
     "NovaTool": "ToolRead",
     "ToolList": "ToolListResponse",
     "ToolRunResult": "ToolResultRead",
+    "GitHubIntegration": "GitHubIntegrationRead",
+    "GitHubIntegrationCreated": "GitHubIntegrationCreated",
 }
 
 # Swift structs whose names differ from the schema's, where the *field* names

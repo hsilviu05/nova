@@ -1,0 +1,62 @@
+name: Release
+
+# Builds the API image and publishes it to GHCR when a version tag is
+# pushed. The tag is the release: nothing is built from a branch name, so
+# what runs in production is always something that can be checked out.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    name: Build and push API image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/nova-api
+          # v0.1.0 -> v0.1.0, v0.1 and the commit sha. No "latest": a
+          # deployment that says "latest" says nothing.
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=sha,prefix=sha-
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/api
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test the pushed image
+        # The image must at least import the app and refuse a production
+        # boot with placeholder settings, which is the guardrail working.
+        run: |
+          image="ghcr.io/${{ github.repository_owner }}/nova-api:sha-$(git rev-parse --short HEAD)"
+          docker run --rm -e NOVA_ENVIRONMENT=production \
+            -e NOVA_JWT__SECRET_KEY=ci-secret-key-at-least-thirty-two-characters-long \
+            "$image" python -c "from nova.core.config import get_settings; get_settings()" \
+            && { echo "guardrail did not fire"; exit 1; } \
+            || echo "guardrail refused placeholder settings, as it should"

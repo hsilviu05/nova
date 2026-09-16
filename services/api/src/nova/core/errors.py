@@ -88,3 +88,11 @@ class ServiceUnavailableError(NovaError):
     status_code = 503
     code = "service_unavailable"
     message = "A required service is unavailable."
+
+
+class PayloadTooLargeError(NovaError):
+    """A request body over the limit for its endpoint."""
+
+    status_code = 413
+    code = "payload_too_large"
+    message = "Request body is too large."

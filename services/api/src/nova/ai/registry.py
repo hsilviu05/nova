@@ -46,10 +46,16 @@ def build_chat_provider(settings: AISettings) -> ChatProvider:
             return OfflineChatProvider()
 
         case "ollama":
+            # No degraded fallback here, unlike anthropic-without-a-key: a
+            # missing credential is known at boot, but whether a local server
+            # is up is a runtime fact. If it is not, every call raises
+            # AIUnavailableError and the API answers 503, which is the truth
+            # -- and /api/v1/system/status says so on the dashboard.
             return OllamaChatProvider(
                 base_url=settings.ollama_base_url,
                 model=settings.chat_model,
                 timeout_seconds=settings.request_timeout_seconds,
+                keep_alive=settings.ollama_keep_alive,
             )
 
         case "openai_compatible":

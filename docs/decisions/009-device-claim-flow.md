@@ -1,12 +1,12 @@
 # 009 — Device claiming by on-screen code
 
-**Status:** ~~Superseded by [015](015-iphone-terminal.md)~~ · **Date:** 2026-09-06 · **Superseded:** 2026-09-16
+**Status:** ~~Superseded by [015](019-iphone-terminal.md)~~ · **Date:** 2026-09-06 · **Superseded:** 2026-09-16
 
 > There is no device to claim. Binding a phone to a NOVA is now typing an
 > address and signing in, which needs none of this machinery. Kept because
 > the reasoning about splitting a low-entropy human-transcribable secret
 > from a high-entropy machine one is the same reasoning behind the
-> confirmation tokens in [013](013-tool-system-and-permissions.md) — those
+> confirmation tokens in [013](017-tool-system-and-permissions.md) — those
 > are the high-entropy half, and there is deliberately no human-typed half
 > at all.
 

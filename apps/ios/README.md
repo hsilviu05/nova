@@ -5,7 +5,7 @@ on the Mac beside it.
 
 The phone is a terminal, not a compute node. It authenticates, renders,
 streams, and listens; the model and every tool run on the machine under the
-desk. See [ADR 015](../../docs/decisions/015-iphone-terminal.md) for why.
+desk. See [ADR 019](../../docs/decisions/019-iphone-terminal.md) for why.
 
 ## Running it
 

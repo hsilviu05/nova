@@ -32,6 +32,7 @@
 		877C3EE7A288355B6E974CC8 /* APIError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80B775EC84D182AE6E8864D4 /* APIError.swift */; };
 		89590938D88AE81F557BDB2F /* ChatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34AB1B510F418016E1418F7F /* ChatTests.swift */; };
 		948BE4A410EC31C40AD33888 /* Voice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 134C94BCCDDAF3DA4C634D37 /* Voice.swift */; };
+		9F24A190B0CE8C6F8309C48A /* GitHubIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12D2E8D2BB6E5A77E2469803 /* GitHubIntegration.swift */; };
 		A4723F6F10390B66CA906661 /* JSONValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A99C8B7828406BCBB9C5DEAC /* JSONValue.swift */; };
 		A844FF2C3B484E55EBE7B3CC /* ServerSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 495CE657B10641BF0E921038 /* ServerSettings.swift */; };
 		AA82950F6340C2C27F11D857 /* TimezonePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEF40C84B629118B33791DE5 /* TimezonePicker.swift */; };
@@ -42,6 +43,7 @@
 		F3C86CA815408B1BE2040244 /* MemoryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52D39D919704AF3DAA7B168F /* MemoryModel.swift */; };
 		F71863FFA2280F33F7510499 /* ToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC66E28C4CFEBDBF7A13792 /* ToolsView.swift */; };
 		F9E073CCB0C9B00BC90E1B37 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35A2EDC8DC8EE5D9B33BD5CD /* Session.swift */; };
+		FCF855522AF15B0EF91E8972 /* GitHubIntegrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFC82448B11B86780F20E965 /* GitHubIntegrationView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -55,6 +57,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		12D2E8D2BB6E5A77E2469803 /* GitHubIntegration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubIntegration.swift; sourceTree = "<group>"; };
 		134C94BCCDDAF3DA4C634D37 /* Voice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Voice.swift; sourceTree = "<group>"; };
 		1423E8758C74572D85C4C77E /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		14C608D6A4C52FBF74298581 /* Conversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Conversation.swift; sourceTree = "<group>"; };
@@ -90,6 +93,7 @@
 		C7BC025DE6DCA7056D192DEF /* NovaAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaAPI.swift; sourceTree = "<group>"; };
 		C81F4F98B003DFC1DD3DA1EE /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		CB9DC80B7C871BBE18452E58 /* ServerSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSettingsTests.swift; sourceTree = "<group>"; };
+		DFC82448B11B86780F20E965 /* GitHubIntegrationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubIntegrationView.swift; sourceTree = "<group>"; };
 		E0C87A00A66AA6F4B1EA9272 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		EFF535C7171BFF69B95312CF /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
 		FA87411E79A8A5ABC695BF24 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -100,6 +104,7 @@
 			isa = PBXGroup;
 			children = (
 				14C608D6A4C52FBF74298581 /* Conversation.swift */,
+				12D2E8D2BB6E5A77E2469803 /* GitHubIntegration.swift */,
 				A99C8B7828406BCBB9C5DEAC /* JSONValue.swift */,
 				96C1EBAE0C2536485764AF6A /* Memory.swift */,
 				35A2EDC8DC8EE5D9B33BD5CD /* Session.swift */,
@@ -228,6 +233,7 @@
 		D39C917F5BEBCD1027733876 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				DFC82448B11B86780F20E965 /* GitHubIntegrationView.swift */,
 				2216A5EBCC1192FF9D08E97E /* SettingsView.swift */,
 				AEF40C84B629118B33791DE5 /* TimezonePicker.swift */,
 			);
@@ -346,6 +352,8 @@
 				5EEDE82923E7ADAA3E044B6D /* Conversation.swift in Sources */,
 				5D00954A6C33EC6DC6058064 /* DashboardModel.swift in Sources */,
 				42B556F5209794873E45CCE0 /* DashboardView.swift in Sources */,
+				9F24A190B0CE8C6F8309C48A /* GitHubIntegration.swift in Sources */,
+				FCF855522AF15B0EF91E8972 /* GitHubIntegrationView.swift in Sources */,
 				DB5ADC673A6B22C1B478138A /* JSONCoding.swift in Sources */,
 				A4723F6F10390B66CA906661 /* JSONValue.swift in Sources */,
 				E8717E5F09D2BBEB5789FEDD /* Memory.swift in Sources */,

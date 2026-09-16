@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from nova.models.conversation import Conversation, Message
+from nova.services.conversation import CONVERSATION_DETAIL_MESSAGE_LIMIT
 
 pytestmark = pytest.mark.integration
 
@@ -342,3 +347,44 @@ class TestStreaming:
             json={"content": "  "},
         )
         assert response.status_code == 422
+
+
+class TestDetailCap:
+    async def test_detail_returns_only_the_newest_page(
+        self, client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+    ) -> None:
+        """A long thread returns its newest messages, and says how many exist.
+
+        Loading every message to show the bottom of the screen is the
+        request that gets slower every day a thread stays open.
+        """
+        conversation = await _conversation(client, auth_headers)
+        conversation_id = uuid.UUID(conversation["id"])
+        total = CONVERSATION_DETAIL_MESSAGE_LIMIT + 5
+
+        base = datetime.now(UTC) - timedelta(minutes=total)
+        for i in range(total):
+            session.add(
+                Message(
+                    conversation_id=conversation_id,
+                    role="user" if i % 2 == 0 else "assistant",
+                    content=f"message {i}",
+                    created_at=base + timedelta(minutes=i),
+                )
+            )
+        thread = await session.get(Conversation, conversation_id)
+        assert thread is not None
+        thread.message_count = total
+        await session.commit()
+
+        response = await client.get(
+            f"/api/v1/conversations/{conversation_id}", headers=auth_headers
+        )
+        assert response.status_code == 200
+        detail = response.json()
+
+        assert detail["message_count"] == total
+        assert len(detail["messages"]) == CONVERSATION_DETAIL_MESSAGE_LIMIT
+        # The newest ones, still in reading order.
+        assert detail["messages"][0]["content"] == "message 5"
+        assert detail["messages"][-1]["content"] == f"message {total - 1}"

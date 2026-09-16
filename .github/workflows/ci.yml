@@ -109,6 +109,46 @@ jobs:
           path: services/api/coverage.xml
           if-no-files-found: ignore
 
+  ml:
+    name: ML pipeline
+    runs-on: ubuntu-latest
+    # No database and no data: the pipeline's guarantees -- features that
+    # cannot see forward, a split with an embargo, gates that refuse thin
+    # data -- are properties of the code, proved on a few dozen hand-built
+    # rows. Nothing here trains a model that means anything, by design.
+    #
+    # Still built and tested after the terminal refactor, though nothing can
+    # currently produce the CSV it reads: the package never imported the API,
+    # so it survived intact, and a dormant package that still passes its own
+    # tests is cheaper to revive than one that silently rotted. See ADR 013
+    # and ADR 019.
+    defaults:
+      run:
+        working-directory: ml
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ml/pyproject.toml
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Format
+        run: ruff format --check .
+
+      - name: Types
+        run: mypy
+
+      - name: Test
+        run: pytest
+
   ios-contract:
     name: iOS contract
     runs-on: ubuntu-latest

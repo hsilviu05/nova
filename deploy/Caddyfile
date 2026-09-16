@@ -1,0 +1,22 @@
+# Caddy in front of the API. TLS is automatic: for a public domain Caddy
+# obtains and renews a Let's Encrypt certificate on its own; for
+# "localhost" it issues one from its internal CA, which is how the stack is
+# tested on a development machine.
+#
+# The Host header is passed through unchanged, which is what the API's
+# allowlist checks, and X-Forwarded-For / X-Forwarded-Proto are set, which
+# is what the rate limiter and the HSTS header read.
+
+{$NOVA_DOMAIN} {
+    encode zstd gzip
+
+    # The API sets its own security headers; the one Caddy adds is the
+    # one only the edge can know for certain.
+    header -Server
+
+    reverse_proxy api:8000 {
+        # Streaming chat is server-sent events and the device link is a
+        # WebSocket; neither survives response buffering.
+        flush_interval -1
+    }
+}

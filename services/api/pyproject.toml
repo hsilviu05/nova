@@ -39,10 +39,14 @@ dependencies = [
     "redis>=5.2,<7",
     # HTTP client. A runtime dependency in its own right, not a transitive
     # one: the Ollama adapter, the OpenAI-compatible adapter, the GitHub
-    # tools and the project health checks all import it directly. It arrives
-    # with the Anthropic SDK anyway, which is exactly why it has to be
-    # declared -- otherwise dropping that SDK would break four unrelated
-    # modules for no visible reason.
+    # tools and the project health checks all import it directly.
+    #
+    # For a while it was only in the dev extras, so the tests had it and the
+    # production image did not -- the API failed at import with
+    # ModuleNotFoundError while every test stayed green. It also arrives with
+    # the Anthropic SDK, which is the other reason it must be declared here:
+    # dropping that SDK would otherwise break four unrelated modules for no
+    # visible reason.
     "httpx>=0.28,<0.29",
     # The Anthropic SDK, imported by the single adapter that talks to it.
     # Optional as a *provider* -- the default is local -- but a runtime
