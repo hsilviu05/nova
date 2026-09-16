@@ -4,12 +4,14 @@ import SwiftUI
 /// them is one field.
 struct SignInView: View {
     @Environment(SessionStore.self) private var session
+    @Environment(ServerSettings.self) private var server
 
     @State private var mode: Mode = .signIn
     @State private var email = ""
     @State private var password = ""
     @State private var displayName = ""
     @FocusState private var focused: Field?
+    @State private var editingServer = false
 
     private enum Mode {
         case signIn, register
@@ -40,6 +42,7 @@ struct SignInView: View {
                 fields
                 errorBanner
                 actions
+                serverFooter
             }
             .padding(.horizontal, 24)
             .padding(.top, 56)
@@ -47,6 +50,9 @@ struct SignInView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Color(.systemGroupedBackground))
+        .sheet(isPresented: $editingServer) {
+            NavigationStack { ServerView() }
+        }
         .animation(.easeInOut(duration: 0.2), value: mode)
         .animation(.easeInOut(duration: 0.2), value: session.error != nil)
     }
@@ -162,6 +168,50 @@ struct SignInView: View {
                 .font(.subheadline)
             }
         }
+    }
+
+    /// Where this phone is pointed, and a way to change it.
+    ///
+    /// On the sign-in screen rather than only in Settings, because Settings
+    /// is behind a sign-in that cannot succeed until this is right. A fresh
+    /// install ships pointing at `127.0.0.1`, which on a phone is the phone
+    /// -- so without this the first run is a dead end: "Can't reach NOVA,
+    /// check the server address in Settings", and no way to reach Settings.
+    private var serverFooter: some View {
+        VStack(spacing: 8) {
+            if server.isLoopback {
+                Label {
+                    Text(
+                        "NOVA is pointed at this phone. Set the address of the "
+                        + "Mac it runs on to sign in."
+                    )
+                    .font(.footnote)
+                    .multilineTextAlignment(.leading)
+                } icon: {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(.orange)
+                }
+                .padding(12)
+                .background(
+                    Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 12)
+                )
+            }
+
+            Button {
+                editingServer = true
+            } label: {
+                VStack(spacing: 2) {
+                    Text("NOVA server")
+                        .font(.footnote)
+                    Text(server.baseURL.absoluteString)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.tint)
+        }
+        .padding(.top, 4)
     }
 
     private var canSubmit: Bool {

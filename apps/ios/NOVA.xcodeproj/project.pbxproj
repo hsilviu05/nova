@@ -20,6 +20,7 @@
 		4194D98E9447FF15D10A99DF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2216A5EBCC1192FF9D08E97E /* SettingsView.swift */; };
 		42B556F5209794873E45CCE0 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2881B09992ECA7757CCAD154 /* DashboardView.swift */; };
 		4608FE30EDF6D0CCD7D8BA30 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C81F4F98B003DFC1DD3DA1EE /* ChatView.swift */; };
+		47B799409C9A835DCBD3480E /* ServerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F48188DAB74FD4FA1A5176E /* ServerView.swift */; };
 		486F7CC0397B01464A41D8DE /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0C87A00A66AA6F4B1EA9272 /* RootView.swift */; };
 		4CF8B7D3B42EBE128B448831 /* TokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9378DC3C160BA866B68D2035 /* TokenStore.swift */; };
 		5A36410BE25BFCB22D637A9E /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1423E8758C74572D85C4C77E /* APIClient.swift */; };
@@ -63,6 +64,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0F48188DAB74FD4FA1A5176E /* ServerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerView.swift; sourceTree = "<group>"; };
 		12D2E8D2BB6E5A77E2469803 /* GitHubIntegration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubIntegration.swift; sourceTree = "<group>"; };
 		134C94BCCDDAF3DA4C634D37 /* Voice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Voice.swift; sourceTree = "<group>"; };
 		1423E8758C74572D85C4C77E /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
@@ -252,6 +254,7 @@
 			isa = PBXGroup;
 			children = (
 				DFC82448B11B86780F20E965 /* GitHubIntegrationView.swift */,
+				0F48188DAB74FD4FA1A5176E /* ServerView.swift */,
 				2216A5EBCC1192FF9D08E97E /* SettingsView.swift */,
 				AEF40C84B629118B33791DE5 /* TimezonePicker.swift */,
 			);
@@ -382,6 +385,7 @@
 				0F8F10D28DCFC316BE4A9CE8 /* NovaAPI.swift in Sources */,
 				486F7CC0397B01464A41D8DE /* RootView.swift in Sources */,
 				A844FF2C3B484E55EBE7B3CC /* ServerSettings.swift in Sources */,
+				47B799409C9A835DCBD3480E /* ServerView.swift in Sources */,
 				F9E073CCB0C9B00BC90E1B37 /* Session.swift in Sources */,
 				0F08BF91EB74E0C40652382E /* SessionStore.swift in Sources */,
 				4194D98E9447FF15D10A99DF /* SettingsView.swift in Sources */,

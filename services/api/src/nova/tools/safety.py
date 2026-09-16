@@ -46,7 +46,17 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _IMPERSONATION = (
     (re.compile(r"</?\s*(system|assistant|user|instructions?)\s*>", re.IGNORECASE), "[tag]"),
     (re.compile(r"<\|[^|>]{0,40}\|>"), "[token]"),
-    (re.compile(r"(?im)^\s*(system|assistant|human|user)\s*:", re.MULTILINE), r"\1(text):"),
+    # Anywhere the marker follows a line start or whitespace, not only at the
+    # start of a line. Every tool that carries somebody else's text puts it
+    # mid-line: `git_log` prefixes a sha, an age and an author, `docker_logs`
+    # prefixes a timestamp, and a GitHub issue title arrives after its
+    # number. Anchoring to `^` left the most likely injection vector of all
+    # -- a commit message or a log line -- with its marker intact.
+    #
+    # Preceded by whitespace rather than by a word boundary, so the `user:`
+    # in a `postgres://user:password@host` URL is left for the credential
+    # redaction below to deal with as a whole.
+    (re.compile(r"(?im)(^|\s)(system|assistant|human|user)\s*:"), r"\1\2(text):"),
     (re.compile(r"(?i)\bignore (?:all |any )?previous instructions\b"), "[redirect attempt]"),
 )
 
