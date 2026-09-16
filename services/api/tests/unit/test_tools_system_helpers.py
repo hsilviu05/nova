@@ -13,6 +13,7 @@ rather than being a branch that only CI ever runs.
 
 from __future__ import annotations
 
+import sys
 import uuid
 from pathlib import Path
 from typing import Any
@@ -204,11 +205,14 @@ class TestMacOSMemory:
     was simply blank with no error anywhere.
     """
 
+    @pytest.mark.skipif(sys.platform != "darwin", reason="vm_stat is a macOS tool")
     async def test_it_reports_a_plausible_reading_of_this_machine(self) -> None:
         """Against the real ``vm_stat``, not a fixture.
 
         A parser that agrees with a fixture and disagrees with the tool is
-        exactly the failure this is here to catch.
+        exactly the failure this is here to catch -- so this one has to run
+        where the tool exists. The parsing itself is covered against recorded
+        output below, which is what CI checks on Linux.
         """
         reading = await _macosmemory_usage()
 
@@ -269,6 +273,23 @@ class TestMacOSMemory:
         assert reading is not None
         assert reading["used_bytes"] == 0
         assert reading["percent_used"] == 0.0
+
+    async def test_a_machine_with_no_vm_stat_reports_no_reading(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``run`` raises for a program it cannot find rather than returning
+        a failed result. Letting that escape would 500 the dashboard that was
+        only asking for a memory figure."""
+        from nova.tools.errors import ToolUnavailableError
+
+        async def missing(argv: list[str], **kwargs: Any) -> CommandResult:
+            raise ToolUnavailableError(
+                "vm_stat is not installed on this machine.", code="tool_not_installed"
+            )
+
+        monkeypatch.setattr("nova.tools.system.run", missing)
+
+        assert await _macosmemory_usage() is None
 
     @pytest.mark.parametrize(
         ("exit_code", "stdout"),

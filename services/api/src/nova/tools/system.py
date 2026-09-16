@@ -30,6 +30,7 @@ from nova.tools.base import (
     ToolSpec,
     narrow,
 )
+from nova.tools.errors import ToolError
 from nova.tools.process import resolve_workspace_path, run
 
 # Processes listed at once. A full listing is hundreds of rows of noise; the
@@ -341,7 +342,15 @@ async def _macosmemory_usage() -> dict[str, Any] | None:
     if total_pages <= 0 or page_size <= 0:  # pragma: no cover - platform dependent
         return None
 
-    result = await run(["vm_stat"], timeout_seconds=5, max_output_bytes=8192)
+    try:
+        result = await run(["vm_stat"], timeout_seconds=5, max_output_bytes=8192)
+    except ToolError:
+        # No vm_stat on this machine, or it did not finish. Either way there
+        # is no reading to report, and a missing memory figure must not take
+        # down the dashboard that was only asking for one -- `run` raises for
+        # a program it cannot find rather than returning a failed result.
+        return None
+
     if not result.ok:
         return None
 
