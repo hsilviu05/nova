@@ -9,10 +9,16 @@ numbers, catch an endpoint that is an order of magnitude off its neighbours,
 and check that a change did not make something ten times slower. The same
 script before and after a change is the comparison that matters.
 
-Each simulated user: registers, reads their profile, claims a device, pushes
-telemetry over the device WebSocket, sends chat messages (offline provider,
-so no model latency in the numbers), lists memories, and reads analytics and
-insights. Every request's wall time is recorded by endpoint.
+Each simulated user: registers, reads their profile, sends chat messages
+(offline provider, so no model latency in the numbers), lists memories, runs
+read-only tools, and reads the dashboard. Every request's wall time is
+recorded by endpoint.
+
+Two of these are worth watching for different reasons than the rest.
+``POST tools/invoke`` spawns a process, so it measures the machine rather
+than the API. ``GET system/status`` probes the model provider and every
+configured project concurrently, so it is the slowest endpoint by design and
+its number says more about what is configured than about NOVA.
 """
 
 from __future__ import annotations
@@ -27,10 +33,8 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
 import httpx
-import websockets
 
 BASE = "http://127.0.0.1:8000/api/v1"
-WS = "ws://127.0.0.1:8000/api/v1/devices/ws"
 
 Timings = dict[str, list[float]]
 
@@ -76,77 +80,6 @@ async def one_user(index: int, rounds: int, timings: Timings, failures: list[str
             if r.status_code != 200:
                 failures.append(f"me {r.status_code}")
 
-        # Device: provision, claim, collect the token.
-        r = await timed(
-            timings,
-            "POST devices/provision",
-            http.post(
-                f"{BASE}/devices/provision",
-                json={
-                    "hardware_id": f"load-{uuid.uuid4().hex[:12]}",
-                    "model": "ESP32-S3",
-                    "firmware_version": "0",
-                },
-            ),
-        )
-        if r.status_code != 201:
-            failures.append(f"provision {r.status_code}")
-            return
-        prov = r.json()
-        r = await timed(
-            timings,
-            "POST devices/claim",
-            http.post(
-                f"{BASE}/devices/claim",
-                headers=headers,
-                json={"code": prov["claim_code"], "name": "L"},
-            ),
-        )
-        if r.status_code != 201:
-            failures.append(f"claim {r.status_code}")
-            return
-        device_id = r.json()["id"]
-        r = await http.post(
-            f"{BASE}/devices/provision/poll",
-            json={"provisioning_token": prov["provisioning_token"]},
-        )
-        if r.status_code != 200 or "device_token" not in r.json():
-            failures.append(f"provision/poll {r.status_code}")
-            return
-        token = r.json()["device_token"]
-
-        # Telemetry over the real socket, in protocol-sized batches.
-        now = datetime.now(UTC)
-        async with websockets.connect(f"{WS}?token={token}") as ws:
-            for round_index in range(rounds):
-                batch = [
-                    {
-                        "event_type": "person_detected",
-                        "recorded_at": (
-                            now - timedelta(minutes=5 * (round_index * 20 + i))
-                        ).isoformat(),
-                        "distance_cm": 60 + i,
-                        "state": "curious",
-                        "data": {"synthetic": True, "generator": "loadcheck"},
-                    }
-                    for i in range(20)
-                ]
-                start = time.perf_counter()
-                await ws.send(
-                    json.dumps(
-                        {
-                            "type": "telemetry.batch",
-                            "version": 1,
-                            "id": str(uuid.uuid4()),
-                            "payload": batch,
-                        }
-                    )
-                )
-                ack = json.loads(await ws.recv())
-                timings["WS telemetry.batch (20)"].append((time.perf_counter() - start) * 1000)
-                if ack.get("type") != "ack":
-                    failures.append(f"batch {ack.get('type')}")
-
         # Chat with the offline provider: streaming path, no model latency.
         r = await timed(
             timings,
@@ -175,11 +108,27 @@ async def one_user(index: int, rounds: int, timings: Timings, failures: list[str
             http.get(f"{BASE}/conversations/{conversation}", headers=headers),
         )
 
+        # A read-only tool, which spawns a process -- this is the one number
+        # that measures the machine rather than the API.
+        for _ in range(max(1, rounds // 2)):
+            r = await timed(
+                timings,
+                "POST tools/invoke (system_health)",
+                http.post(
+                    f"{BASE}/tools/invoke",
+                    headers=headers,
+                    json={"name": "system_health", "arguments": {}},
+                ),
+            )
+            if r.status_code != 200:
+                failures.append(f"tool {r.status_code}")
+
         for label, path in (
             ("GET memories", f"{BASE}/memories"),
-            ("GET devices/{id}/telemetry", f"{BASE}/devices/{device_id}/telemetry?limit=100"),
-            ("GET devices/{id}/analytics", f"{BASE}/devices/{device_id}/analytics?window_days=30"),
-            ("GET devices/{id}/insights", f"{BASE}/devices/{device_id}/insights?window_days=30"),
+            ("GET tools", f"{BASE}/tools"),
+            ("GET system/activity", f"{BASE}/system/activity?limit=50"),
+            # Slowest by design: it probes the model and every project.
+            ("GET system/status", f"{BASE}/system/status"),
         ):
             for _ in range(max(1, rounds // 2)):
                 r = await timed(timings, label, http.get(path, headers=headers))

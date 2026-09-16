@@ -11,8 +11,18 @@ struct APIErrorEnvelope: Decodable, Sendable {
         let details: Details?
     }
 
+    /// The `details` object, which carries whatever a particular error
+    /// needs. Every field is optional because most errors use none of them.
     struct Details: Decodable, Sendable {
         let errors: [FieldError]?
+
+        /// Present on `tool_confirmation_required`. Together these are the
+        /// whole handshake: what NOVA wants to do, in words, and the token
+        /// that authorises exactly that.
+        let tool: String?
+        let prompt: String?
+        let confirmationToken: String?
+        let expiresInSeconds: Int?
     }
 
     /// One field-level validation failure.

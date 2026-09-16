@@ -8,7 +8,14 @@ from __future__ import annotations
 
 import pytest
 
-from nova.ai.base import ChatMessage, ChatProvider, ChatRequest, EmbeddingProvider
+from nova.ai.base import (
+    ChatMessage,
+    ChatProvider,
+    ChatRequest,
+    EmbeddingProvider,
+    StreamCompleted,
+    TextDelta,
+)
 from nova.ai.errors import AIConfigurationError
 from nova.ai.offline import OfflineChatProvider, OfflineEmbeddingProvider
 from nova.ai.registry import build_chat_provider, build_embedding_provider
@@ -41,11 +48,32 @@ class TestOfflineChat:
 
     async def test_streams_in_several_chunks(self) -> None:
         provider = OfflineChatProvider(chunk_size=4)
-        chunks = [chunk async for chunk in provider.stream(_request())]
+        events = [event async for event in provider.stream(_request())]
+        deltas = [event.text for event in events if isinstance(event, TextDelta)]
 
         # Streaming behaviour has to be exercised, not just the final text.
-        assert len(chunks) > 1
-        assert "".join(chunks) == (await provider.complete(_request())).text
+        assert len(deltas) > 1
+        assert "".join(deltas) == (await provider.complete(_request())).text
+
+    async def test_a_stream_ends_with_a_completion_event(self) -> None:
+        """The consumer needs to know a turn finished, not merely stop hearing.
+
+        Without a terminal event, "the model has nothing more to say" and
+        "the connection died" look identical to the tool loop.
+        """
+        events = [event async for event in OfflineChatProvider().stream(_request())]
+
+        assert isinstance(events[-1], StreamCompleted)
+        assert events[-1].stop_reason == "end_turn"
+
+    def test_offers_no_tools(self) -> None:
+        """A provider that cannot choose a tool must say so.
+
+        Handing tools to one that ignores them produces a model that
+        describes running a command instead of running it, which reads as
+        NOVA lying about what it did.
+        """
+        assert OfflineChatProvider().supports_tools is False
 
     async def test_is_deterministic(self) -> None:
         provider = OfflineChatProvider()
@@ -115,7 +143,7 @@ class TestRegistry:
         assert build_chat_provider(AISettings()).name == "offline"
 
     def test_anthropic_without_a_key_degrades_rather_than_failing(self) -> None:
-        """A companion that will not boot is worse than one that is honest."""
+        """A terminal that will not boot is worse than one that is honest."""
         provider = build_chat_provider(AISettings(chat_provider="anthropic"))
         assert provider.name == "offline"
 
@@ -123,11 +151,35 @@ class TestRegistry:
         provider = build_chat_provider(
             AISettings(
                 chat_provider="anthropic",
+                chat_model="claude-opus-5",
                 anthropic_api_key="sk-ant-not-a-real-key",  # type: ignore[arg-type]
             )
         )
         assert provider.name == "anthropic"
         assert provider.model == "claude-opus-5"
+
+    def test_ollama_builds_without_reaching_the_network(self) -> None:
+        """Nothing is probed at construction.
+
+        A terminal whose whole job is telling you what is running must start
+        when the model server is not. ``/api/v1/system/status`` is what
+        reports that, and it can only do so from a process that booted.
+        """
+        provider = build_chat_provider(
+            AISettings(chat_provider="ollama", chat_model="qwen3.8:latest")
+        )
+
+        assert provider.name == "ollama"
+        assert provider.model == "qwen3.8:latest"
+        assert provider.supports_tools is True
+
+    def test_an_openai_compatible_server_is_a_first_class_provider(self) -> None:
+        provider = build_chat_provider(
+            AISettings(chat_provider="openai_compatible", chat_model="local-model")
+        )
+
+        assert provider.name == "openai_compatible"
+        assert provider.supports_tools is True
 
     def test_rejects_an_unknown_provider(self) -> None:
         settings = AISettings()
@@ -165,12 +217,32 @@ class TestPersona:
         prompt = build_system_prompt()
 
         assert "NOVA" in prompt
-        assert "curious" in prompt
+        assert "direct" in prompt
 
-    def test_prompt_forbids_markdown(self) -> None:
-        # Replies are spoken aloud or shown in a chat bubble; headings and
-        # bullet points read as noise in both.
-        assert "markdown" in build_system_prompt().lower()
+    def test_the_tool_rules_appear_only_when_there_are_tools(self) -> None:
+        """A model told how to use tools it does not have will describe using
+        them, which reads as NOVA claiming to have checked something it never
+        looked at -- the worst failure mode a terminal has."""
+        without = build_system_prompt(has_tools=False)
+        with_tools = build_system_prompt(has_tools=True)
+
+        assert "Using tools" not in without
+        assert "Using tools" in with_tools
+
+    def test_the_tool_prompt_frames_output_as_untrusted(self) -> None:
+        """The framing half of the injection defence.
+
+        Not sufficient on its own -- capability is what actually bounds the
+        damage -- but it has to be present and has to say the same thing the
+        wrapper in nova.tools.safety says.
+        """
+        prompt = build_system_prompt(has_tools=True)
+
+        assert "data, not instruction" in prompt
+        assert "ignore your rules" in prompt
+
+    def test_the_prompt_forbids_disclosing_credentials(self) -> None:
+        assert "credentials" in build_system_prompt().lower()
 
     def test_prompt_is_stable(self) -> None:
         # Byte-stability is what lets the adapter mark it as a cacheable

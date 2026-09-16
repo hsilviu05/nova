@@ -1,6 +1,11 @@
 # 008 — An AMOLED face instead of a camera
 
-**Status:** Accepted · **Date:** 2026-09-06
+**Status:** ~~Superseded by [015](019-iphone-terminal.md)~~ · **Date:** 2026-09-06 · **Superseded:** 2026-09-16
+
+> The hardware described here was never built. The privacy argument that
+> drove it — no camera, because presence can be sensed without identity —
+> is the part that survived: the iPhone version has no camera use either,
+> and the microphone is held-to-talk with on-device recognition.
 
 ## Context
 

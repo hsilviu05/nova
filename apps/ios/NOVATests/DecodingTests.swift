@@ -70,6 +70,7 @@ struct DecodingTests {
             "id": "113bf44d-995e-4cfe-b519-2589519e1d80",
             "email": "someone@example.com",
             "display_name": "Silviu",
+            "timezone": "Europe/Bucharest",
             "is_active": true,
             "created_at": "2026-09-06T15:42:28.579713Z",
             "last_login_at": "2026-09-06T15:42:28.625180Z"
@@ -88,6 +89,7 @@ struct DecodingTests {
         )
 
         #expect(result.user.displayName == "Silviu")
+        #expect(result.user.timezone == "Europe/Bucharest")
         #expect(result.user.isActive)
         #expect(result.user.lastLoginAt != nil)
         #expect(result.tokens.tokenType == "bearer")
@@ -104,135 +106,228 @@ struct DecodingTests {
         #expect(pair.expiry(from: now).timeIntervalSince(now) == 900)
     }
 
-    // MARK: - Devices
+    // MARK: - System status
 
-    @Test("Decodes a claimed device, including its null fields")
-    func device() throws {
+    @Test("Decodes the dashboard's one response")
+    func systemStatus() throws {
+        // Captured from a running NOVA with nothing configured beyond the
+        // defaults, which is the state a first run is actually in.
         let json = """
         {
-          "id": "dc8608e9-f102-4e72-af8e-f15a1abd7259",
-          "name": "Nova",
-          "model": "ESP32-S3-Touch-AMOLED-2.06",
-          "firmware_version": "0.1.0",
-          "hardware_id": "esp32s3-838215147",
-          "is_online": false,
-          "last_seen_at": null,
-          "claimed_at": "2026-09-06T15:42:28.699214Z",
-          "created_at": "2026-09-06T15:42:28.664075Z"
+          "generated_at": "2026-09-16T15:42:28.579713Z",
+          "ai": {
+            "provider": "ollama", "model": "qwen3.8:latest", "online": true,
+            "supports_tools": true, "latency_ms": 412.5, "detail": null
+          },
+          "host": {
+            "hostname": "silviu-mac", "platform": "Darwin 27.0.0", "cpu_count": 10,
+            "load_per_core": 0.42, "memory_percent_used": 61.3,
+            "disk_percent_used": 74.1
+          },
+          "dependencies": [
+            {"name": "postgres", "healthy": true, "latency_ms": 1.2, "error": null},
+            {"name": "redis", "healthy": true, "latency_ms": 0.4, "error": null}
+          ],
+          "projects": [],
+          "memory": {"total": 12, "recent": ["Prefers PostgreSQL for new projects"]},
+          "tools": {
+            "count": 7, "groups": ["git", "knowledge", "system"],
+            "shell_enabled": false, "invocations_today": 3, "failures_today": 0
+          },
+          "recent_activity": []
         }
         """
 
-        let device = try JSONCoding.decoder.decode(Device.self, from: Data(json.utf8))
-
-        #expect(device.name == "Nova")
-        #expect(device.isOnline == false)
-        // A freshly claimed device has never reported in.
-        #expect(device.lastSeenAt == nil)
-        #expect(device.claimedAt != nil)
-    }
-
-    @Test("Falls back to the model when a device has no name")
-    func unnamedDevice() throws {
-        let json = """
-        {
-          "id": "dc8608e9-f102-4e72-af8e-f15a1abd7259",
-          "name": null,
-          "model": "ESP32-S3-Touch-AMOLED-2.06",
-          "firmware_version": null,
-          "hardware_id": "esp32s3-1",
-          "is_online": true,
-          "last_seen_at": "2026-09-06T15:42:28.579713Z",
-          "claimed_at": "2026-09-06T15:42:28.699214Z",
-          "created_at": "2026-09-06T15:42:28.664075Z"
-        }
-        """
-
-        let device = try JSONCoding.decoder.decode(Device.self, from: Data(json.utf8))
-        #expect(device.displayName == "ESP32-S3-Touch-AMOLED-2.06")
-    }
-
-    @Test("Decodes a telemetry event with sparse fields")
-    func telemetry() throws {
-        // Events carry only what changed, so most columns are null.
-        let json = """
-        [{
-          "id": "aa8608e9-f102-4e72-af8e-f15a1abd7259",
-          "event_type": "person_detected",
-          "recorded_at": "2026-09-06T15:42:28.579713Z",
-          "received_at": "2026-09-06T15:42:28.680000Z",
-          "battery_percent": null,
-          "temperature_c": null,
-          "distance_cm": 72,
-          "head_yaw": 14,
-          "head_pitch": null,
-          "wifi_rssi": null,
-          "uptime_seconds": null,
-          "state": "CURIOUS",
-          "payload": {"source": "time_of_flight"}
-        }]
-        """
-
-        let events = try JSONCoding.decoder.decode(
-            [TelemetryEvent].self, from: Data(json.utf8)
+        let status = try JSONCoding.decoder.decode(
+            SystemStatus.self, from: Data(json.utf8)
         )
 
-        #expect(events.count == 1)
-        #expect(events[0].distanceCm == 72)
-        #expect(events[0].batteryPercent == nil)
-        // recorded_at and received_at are distinct on purpose: a backlog
-        // flushed after an outage must not read as live activity.
-        #expect(events[0].recordedAt != events[0].receivedAt)
-        // Event-specific fields survive rather than being dropped.
-        #expect(events[0].payload["source"]?.stringValue == "time_of_flight")
+        #expect(status.ai.model == "qwen3.8:latest")
+        #expect(status.host.cpuCount == 10)
+        #expect(status.memory.total == 12)
+        #expect(status.tools.shellEnabled == false)
+        #expect(status.isHealthy)
     }
 
-    @Test("Decodes a payload of mixed JSON types")
-    func mixedPayload() throws {
+    @Test("A model server that is down reads as a problem, not a failure")
+    func systemStatusDegraded() throws {
+        // The most likely state of a NOVA on a laptop that just woke up. The
+        // screen has to render it, not fail to decode it.
         let json = """
         {
+          "generated_at": "2026-09-16T15:42:28.579713Z",
+          "ai": {
+            "provider": "ollama", "model": "qwen3.8:latest", "online": false,
+            "supports_tools": true, "latency_ms": null,
+            "detail": "The local model server is not reachable. Is Ollama running?"
+          },
+          "host": {
+            "hostname": "silviu-mac", "platform": "Darwin 27.0.0", "cpu_count": 10,
+            "load_per_core": null, "memory_percent_used": null,
+            "disk_percent_used": 74.1
+          },
+          "dependencies": [
+            {"name": "redis", "healthy": false, "latency_ms": null, "error": "ConnectionError"}
+          ],
+          "projects": [
+            {
+              "name": "SnapWorth", "healthy": false, "reachable": false,
+              "description": "Valuation API", "status_code": null,
+              "latency_ms": null, "dependencies": {}
+            }
+          ],
+          "memory": {"total": 0, "recent": []},
+          "tools": {
+            "count": 0, "groups": [], "shell_enabled": false,
+            "invocations_today": 0, "failures_today": 0
+          },
+          "recent_activity": []
+        }
+        """
+
+        let status = try JSONCoding.decoder.decode(
+            SystemStatus.self, from: Data(json.utf8)
+        )
+
+        #expect(!status.isHealthy)
+        // Each failure is named separately, because "something is wrong" is
+        // not an actionable thing to read across a desk.
+        #expect(status.problems.count == 3)
+        #expect(status.projects[0].summary == "Not responding")
+    }
+
+    @Test("Decodes the audit log")
+    func activity() throws {
+        let json = """
+        {"items": [{
           "id": "aa8608e9-f102-4e72-af8e-f15a1abd7259",
-          "event_type": "motion",
-          "recorded_at": "2026-09-06T15:42:28.579713Z",
-          "received_at": "2026-09-06T15:42:28.680000Z",
-          "battery_percent": null, "temperature_c": null, "distance_cm": null,
-          "head_yaw": null, "head_pitch": null, "wifi_rssi": null,
-          "uptime_seconds": null, "state": null,
-          "payload": {
-            "picked_up": true, "tilt_degrees": 32.5,
-            "axis": "y", "nothing": null
+          "tool_name": "docker_containers", "tool_group": "docker",
+          "permission": "read", "status": "succeeded",
+          "initiated_by_model": true, "confirmed": false,
+          "duration_ms": 84, "error_code": null,
+          "created_at": "2026-09-16T15:42:28.579713Z"
+        }, {
+          "id": "bb8608e9-f102-4e72-af8e-f15a1abd7259",
+          "tool_name": "docker_remove_container", "tool_group": "docker",
+          "permission": "destructive", "status": "refused",
+          "initiated_by_model": true, "confirmed": false,
+          "duration_ms": 1, "error_code": "tool_needs_confirmation",
+          "created_at": "2026-09-16T15:42:29.579713Z"
+        }]}
+        """
+
+        let page = try JSONCoding.decoder.decode(ActivityPage.self, from: Data(json.utf8))
+
+        #expect(page.items.count == 2)
+        #expect(page.items[0].succeeded)
+        // A refusal is in the log too, and reads as one.
+        #expect(!page.items[1].succeeded)
+        #expect(page.items[1].outcome == "refused")
+    }
+
+    // MARK: - Tools
+
+    @Test("Decodes the tool catalogue with its schemas")
+    func tools() throws {
+        let json = """
+        {
+          "items": [{
+            "name": "docker_logs",
+            "description": "The most recent log lines from one container.",
+            "group": "docker", "permission": "read",
+            "requires_confirmation": false,
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "container": {"type": "string", "title": "Container"},
+                "lines": {"type": "integer", "default": 50}
+              },
+              "required": ["container"],
+              "additionalProperties": false
+            }
+          }],
+          "shell_enabled": false
+        }
+        """
+
+        let list = try JSONCoding.decoder.decode(ToolList.self, from: Data(json.utf8))
+        let tool = try #require(list.items.first)
+
+        #expect(tool.permission == .read)
+        // Required arguments come first, so the form reads in the order
+        // somebody would fill it in.
+        #expect(tool.argumentNames == ["container", "lines"])
+        #expect(tool.isRequired("container"))
+        #expect(!tool.isRequired("lines"))
+    }
+
+    @Test("A permission this build has not heard of is treated as dangerous")
+    func unknownPermission() throws {
+        // A newer server may add one. Assuming the safest reading would be
+        // the wrong way round: an unknown permission is not a reason to
+        // relax, so it is shown as something that changes things.
+        let json = """
+        {
+          "items": [{
+            "name": "future_tool", "description": "Does something new.",
+            "group": "system", "permission": "apocalyptic",
+            "requires_confirmation": true,
+            "input_schema": {"type": "object", "properties": {}}
+          }],
+          "shell_enabled": false
+        }
+        """
+
+        let list = try JSONCoding.decoder.decode(ToolList.self, from: Data(json.utf8))
+
+        #expect(list.items[0].permission == .unknown)
+        #expect(list.items[0].permission.changesThings)
+    }
+
+    @Test("A confirmation is read out of the 409 the server answers with")
+    func confirmationFromError() throws {
+        // The whole handshake, as it arrives: what NOVA wants to do in
+        // words, and the token that authorises exactly that.
+        let json = """
+        {"error": {
+          "code": "tool_confirmation_required",
+          "message": "Remove the Docker container “nova-api”? This cannot be undone.",
+          "request_id": "7f1b",
+          "details": {
+            "tool": "docker_remove_container",
+            "prompt": "Remove the Docker container “nova-api”? This cannot be undone.",
+            "confirmation_token": "S3cr3t-t0ken",
+            "expires_in_seconds": 180
           }
-        }
+        }}
         """
 
-        let event = try JSONCoding.decoder.decode(
-            TelemetryEvent.self, from: Data(json.utf8)
+        let envelope = try JSONCoding.decoder.decode(
+            APIErrorEnvelope.self, from: Data(json.utf8)
+        )
+        let confirmation = try #require(
+            PendingConfirmation(.api(status: 409, envelope: envelope.error))
         )
 
-        #expect(event.payload["picked_up"] == .bool(true))
-        #expect(event.payload["tilt_degrees"] == .number(32.5))
-        #expect(event.payload["axis"] == .string("y"))
-        #expect(event.payload["nothing"] == .null)
+        #expect(confirmation.tool == "docker_remove_container")
+        #expect(confirmation.token == "S3cr3t-t0ken")
+        #expect(confirmation.prompt.contains("nova-api"))
     }
 
-    @Test("An empty payload decodes to an empty dictionary, not a failure")
-    func emptyPayload() throws {
+    @Test("An ordinary error is not mistaken for a confirmation")
+    func nonConfirmationError() throws {
         let json = """
-        {
-          "id": "aa8608e9-f102-4e72-af8e-f15a1abd7259",
-          "event_type": "heartbeat",
-          "recorded_at": "2026-09-06T15:42:28.579713Z",
-          "received_at": "2026-09-06T15:42:28.680000Z",
-          "battery_percent": 78, "temperature_c": null, "distance_cm": null,
-          "head_yaw": null, "head_pitch": null, "wifi_rssi": null,
-          "uptime_seconds": null, "state": "IDLE",
-          "payload": {}
-        }
+        {"error": {
+          "code": "tool_not_found", "message": "No such tool.",
+          "request_id": null, "details": null
+        }}
         """
 
-        let event = try JSONCoding.decoder.decode(
-            TelemetryEvent.self, from: Data(json.utf8)
+        let envelope = try JSONCoding.decoder.decode(
+            APIErrorEnvelope.self, from: Data(json.utf8)
         )
-        #expect(event.payload.isEmpty)
+
+        #expect(PendingConfirmation(.api(status: 404, envelope: envelope.error)) == nil)
     }
 
     // MARK: - Errors

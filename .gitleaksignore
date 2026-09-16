@@ -34,3 +34,16 @@
 # was flagged, never paste it.
 b302b8b096f858ca7926874b410c5c4207cd7b31:.gitleaksignore:generic-api-key:11
 b302b8b096f858ca7926874b410c5c4207cd7b31:.gitleaksignore:generic-api-key:20
+
+# Two parameters in the test suite for the tool system's output redaction.
+# One is a PEM private-key block, the other a JWT; both are arguments to a
+# test that asserts redact_secrets() removes them before tool output can
+# reach a model or the audit log.
+#
+# Same reasoning as the memory-extraction entry above, one layer out: the
+# strings have to be shaped like credentials or the test proves nothing, so
+# the scanner finding them is the test working. Neither was issued by
+# anything. The key is a truncated fragment that is not a usable key, and the
+# JWT is the example token from jwt.io's own documentation.
+ddb12532dfe3de669e556819f7af28b08d5605a9:services/api/tests/unit/test_tool_safety.py:private-key:54
+ddb12532dfe3de669e556819f7af28b08d5605a9:services/api/tests/unit/test_tool_safety.py:jwt:34

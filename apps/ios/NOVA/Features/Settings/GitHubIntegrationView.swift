@@ -1,12 +1,16 @@
 import SwiftUI
 
-/// Connect a GitHub webhook so the robot reacts to your builds.
+/// Connect a GitHub webhook so NOVA hears about your builds.
+///
+/// The reaction used to be a face and a spoken line on a robot. There is no
+/// robot, so what a delivery leaves behind is the line itself, recorded
+/// against the integration and shown here under "last event".
 ///
 /// The secret appears exactly once, right after connecting, in a box with a
 /// copy button. That is not a UI choice; the server does not return it
 /// again. The screen says so before the button is pressed.
 struct GitHubIntegrationView: View {
-    @Environment(NovaAPI.self) private var api
+    @Environment(\.novaAPI) private var api
 
     @State private var integration: GitHubIntegration?
     @State private var freshSecret: String?

@@ -37,25 +37,26 @@ private struct LaunchView: View {
 }
 
 /// The signed-in navigation.
+///
+/// Four tabs, in the order the questions get asked: what's the state of
+/// things, talk to it, what does it know, what can it do. Settings is fifth
+/// because it is opened once a month.
 struct MainTabView: View {
     let user: User
 
     var body: some View {
         TabView {
-            Tab("Home", systemImage: "house") {
-                HomeView()
+            Tab("Dashboard", systemImage: "square.grid.2x2") {
+                DashboardView()
             }
             Tab("Chat", systemImage: "bubble.left.and.bubble.right") {
                 ChatView()
             }
-            Tab("Memory", systemImage: "brain") {
+            Tab("Memory", systemImage: "sparkles") {
                 MemoryView()
             }
-            Tab("Insights", systemImage: "chart.bar") {
-                InsightsView()
-            }
-            Tab("Devices", systemImage: "cpu") {
-                DeviceListView()
+            Tab("Tools", systemImage: "wrench.and.screwdriver") {
+                ToolsView()
             }
             Tab("Settings", systemImage: "gearshape") {
                 SettingsView(user: user)
@@ -64,21 +65,21 @@ struct MainTabView: View {
     }
 }
 
-/// NOVA's mark: a pair of eyes, the same idea the device shows on its face.
+/// NOVA's mark: a pair of marks that read as attention rather than a face.
 struct NovaMark: View {
     var size: CGFloat = 56
     var isAwake: Bool = true
 
     var body: some View {
         HStack(spacing: size * 0.22) {
-            eye
-            eye
+            bar
+            bar
         }
         .frame(width: size, height: size * 0.62)
         .animation(.easeInOut(duration: 0.3), value: isAwake)
     }
 
-    private var eye: some View {
+    private var bar: some View {
         RoundedRectangle(cornerRadius: size * 0.16, style: .continuous)
             .fill(Color.accentColor)
             .frame(width: size * 0.28, height: isAwake ? size * 0.52 : size * 0.08)

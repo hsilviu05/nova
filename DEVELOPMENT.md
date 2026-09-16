@@ -8,6 +8,9 @@
 | Python | 3.12+ | For running the API or tests on the host |
 | PostgreSQL | 16+ with pgvector | Provided by Compose; needed locally otherwise |
 | Redis | 7+ | Provided by Compose |
+| Ollama | recent | Optional. Without it NOVA runs on the offline provider |
+| Xcode | 16+ | Only for the iOS client |
+| XcodeGen | recent | `brew install xcodegen`; the `.xcodeproj` is generated |
 
 ## Setup
 
@@ -55,6 +58,71 @@ needs. Compose overrides it to `postgres` for the containerised API.
 > The API is served through uvicorn's `--factory` mode. `nova.main` builds
 > nothing at import time, so importing it never demands configuration — that
 > is what lets the test suite construct an app against a test database.
+
+### Giving it a model
+
+NOVA starts and works with no model at all: the `offline` provider answers
+with honest canned lines, which is what makes the test suite need no key and
+no network. To attach a real one:
+
+```bash
+ollama serve
+ollama pull qwen3.8            # or any model whose capabilities include tools
+
+# .env
+NOVA_AI__CHAT_PROVIDER=ollama
+NOVA_AI__CHAT_MODEL=qwen3.8:latest
+NOVA_AI__OLLAMA_BASE_URL=http://127.0.0.1:11434
+```
+
+From a container, that URL is `http://host.docker.internal:11434`.
+
+**Check the model supports tools** — `ollama show <model>` lists capabilities.
+A model without tool support will emit a tool call as *text* in its reply
+rather than as a structured call, and NOVA will pass it through as prose.
+`qwen2.5-coder:7b` does this; `qwen3.8` and `llama3.2:3b` do not. NOVA asks
+the provider whether tools are supported and stops offering them when the
+answer is no, but it cannot make a model capable.
+
+Two practical notes about Ollama on a laptop:
+
+- **A large model holds its memory for five minutes after a request**, and a
+  27B model with a long context can occupy enough that nothing else loads.
+  `curl http://127.0.0.1:11434/api/ps` shows what is resident.
+- **The first request after a cold start includes the load**, which for a
+  large model is minutes, not seconds. `/api/v1/system/status` probes with a
+  six-second budget and will report the model as not answering until it is
+  warm. That is the honest answer, not a bug.
+
+### Turning capabilities on
+
+Everything that reaches outside the API process is off until it is configured:
+
+```bash
+# Directories the git and disk tools may look at. Empty means nothing.
+NOVA_TOOLS__WORKSPACE_ROOTS=["/Users/you/code"]
+
+# Services the project tools can check, by name.
+NOVA_INTEGRATIONS__PROJECTS=[{"name":"SnapWorth","base_url":"http://localhost:9000"}]
+
+NOVA_TOOLS__DOCKER_ENABLED=true
+NOVA_TOOLS__GITHUB_ENABLED=true
+NOVA_INTEGRATIONS__GITHUB_TOKEN=ghp_...     # read-only scopes
+```
+
+> These are JSON values. In a shell, quote them —
+> `NOVA_TOOLS__WORKSPACE_ROOTS='["/path/with spaces"]'` — or the shell will
+> split on the space and pydantic will reject the fragment.
+
+Shell execution is separate and deliberately awkward:
+
+```bash
+NOVA_TOOLS__SHELL_ENABLED=true
+NOVA_TOOLS__SHELL_ALLOWLIST=["docker","git"]
+```
+
+Enabled with an empty allowlist registers nothing at all. See
+[SECURITY.md](SECURITY.md#the-tool-system) before turning this on.
 
 ## Configuration
 
@@ -109,7 +177,7 @@ pytest                                       # everything
 pytest tests/unit                            # no database needed
 pytest -m integration                        # database-backed
 pytest --cov=nova --cov-report=term-missing
-pytest -k reuse -vv                          # one behaviour
+pytest -k confirmation -vv                   # one behaviour
 ```
 
 Tests run against a **real** PostgreSQL and Redis. The mechanisms most worth
@@ -130,6 +198,33 @@ Each test runs inside a transaction that is rolled back afterwards, so tests
 neither see nor leave each other's rows and the suite can be run repeatedly
 without cleanup.
 
+That has one consequence worth knowing when writing new tests. Application
+`commit()` calls become savepoint releases, so a handler that *raises* rolls
+back the request's savepoint and takes anything written inside it with it —
+including audit rows written from a second session, which in production would
+be an independent connection. Tests that assert on a refusal being audited
+therefore drive `ToolService` directly rather than going through HTTP, and
+say so where they do. Testing that through the endpoint would assert the
+fixture's behaviour rather than NOVA's.
+
+Some tests run **real processes** — `echo`, `sh`, `sleep`, `env`, and a
+throwaway `git` repository built in a temporary directory. That is deliberate:
+a test that mocks `create_subprocess_exec` proves the code calls a function,
+not that a branch named `; rm -rf ~` is inert, and the second is the claim
+that matters.
+
+### The iOS suite
+
+```bash
+cd apps/ios
+xcodegen generate
+xcodebuild -project NOVA.xcodeproj -scheme NOVA \
+  -destination 'platform=iOS Simulator,name=iPhone 17' test
+```
+
+No server required: the tests decode captured payloads and drive the models
+with hand-fed events.
+
 ### Coverage and greenlets
 
 `pyproject.toml` sets `concurrency = ["greenlet", "thread"]`. SQLAlchemy's
@@ -137,6 +232,29 @@ asyncio layer resumes coroutines inside greenlets, and without that setting
 every line after the first `await` on a repository call is reported
 unexecuted — which understated the auth service by roughly half. If coverage
 numbers ever look implausibly low for async code, check that setting first.
+
+## Contract checks
+
+The iOS app cannot be compiled without a macOS runner, so CI cannot catch a
+backend schema change that breaks the client. This can:
+
+```bash
+cd services/api && python -c "
+import json
+from nova.core.config import JWTSettings, Settings
+from nova.main import create_app
+settings = Settings(environment='test', jwt=JWTSettings(secret_key='x'*40))
+json.dump(create_app(settings).openapi(), open('openapi.json','w'))
+"
+cd ../.. && python scripts/check_ios_contract.py services/api/openapi.json
+```
+
+It compares every Swift model's stored properties against the schema it
+decodes, after applying the same snake-to-camel conversion the decoder uses,
+and checks that the enums the app mirrors — memory categories, tool
+permissions — match the server's literals exactly. A `read` tool the app
+believes is `destructive`, or the reverse, would show the wrong warning before
+somebody pressed a button.
 
 ## Code quality
 
@@ -164,6 +282,30 @@ default. Generate one as shown in Setup.
 Likely a truncated value. If you generated it without `tr -d '\n'`, the
 newline broke `.env` parsing.
 
+**`ModuleNotFoundError: No module named 'nova'` right after `pip install -e .`, on macOS**
+
+The editable install writes a `.pth` file pointing at `src/`, and macOS has
+set the `UF_HIDDEN` flag on it. Python 3.13+ deliberately skips hidden `.pth`
+files, so the path is never added. `ls -lO` shows `hidden` on the file when
+this is what is happening.
+
+```bash
+chflags nohidden .venv/lib/python3.*/site-packages/*.pth
+```
+
+If it comes back within seconds, the flag is being re-applied by iCloud Drive
+— which happens when the checkout lives under a synced `~/Desktop` or
+`~/Documents`. Two real fixes, in order of preference:
+
+1. **Move the checkout off the synced folder**, e.g. to `~/code/nova`. A
+   virtualenv inside iCloud Drive is a bad idea for several other reasons too:
+   it is tens of thousands of files that sync pointlessly, and compiled
+   extensions get quarantine attributes.
+2. **Bypass the `.pth`**: `export PYTHONPATH=$PWD/src` before running
+   `pytest`, `alembic` or `uvicorn`.
+
+Neither CI nor Docker hits this; it is a macOS filesystem flag.
+
 **`connection refused` on port 5432**
 Postgres is not up yet, or a local Postgres is already bound to the port. Set
 `NOVA_POSTGRES_PORT` to something free.
@@ -183,11 +325,33 @@ FastAPI infers `response_model` from the return annotation, and `-> None`
 yields `NoneType`, which is a truthy class. Pass `response_model=None`
 explicitly on 204 routes.
 
+**`error parsing value for field "tools" from source "EnvSettingsSource"`**
+A JSON-valued setting was not quoted in the shell, so it was word-split before
+pydantic saw it. Quote it:
+`NOVA_TOOLS__WORKSPACE_ROOTS='["/path/with spaces"]'`.
+
+**The model narrates running a tool instead of running one**
+It does not support tool calling, or it does and chose to emit the call as
+text. Check `ollama show <model>` for `tools` under capabilities, and try a
+different model before assuming NOVA is at fault — `/api/v1/system/activity`
+shows whether any tool was actually invoked.
+
+**`/api/v1/system/status` reports the model offline while it plainly works**
+The probe has a six-second budget, and a cold or evicted model takes longer
+than that to load. `curl http://127.0.0.1:11434/api/ps` shows what is resident.
+
+**The phone cannot reach NOVA**
+In order: is the app pointed at the Mac's address rather than `127.0.0.1`; did
+iOS ask for local network permission and was it granted; is the API bound to
+`0.0.0.0` rather than `127.0.0.1`; and is a firewall in the way. The Settings
+screen calls out the first of these when it applies.
+
 ## Project layout
 
 ```
 services/api/
 ├── src/nova/
+│   ├── ai/             provider interfaces and adapters
 │   ├── api/            routes and dependency wiring
 │   ├── core/           config, logging, errors, security, clock
 │   ├── db/             engine, session, Redis, declarative base
@@ -196,6 +360,7 @@ services/api/
 │   ├── repositories/   data access
 │   ├── schemas/        Pydantic request/response models
 │   ├── services/       business logic
+│   ├── tools/          the tool system: base, registry, safety, adapters
 │   └── main.py         application factory
 ├── alembic/            migrations
 └── tests/
@@ -210,3 +375,43 @@ Where new code goes:
 - A query → `repositories/`
 - A table → `models/` plus a migration
 - A request or response shape → `schemas/`
+- A new capability → `tools/`, registered in `tools/registry.py`
+
+### Adding a tool
+
+Four things, in one file:
+
+```python
+class RestartInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    container: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][\w.-]*$")
+
+
+class RestartTool(Tool):
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="docker_restart",
+            description="Restart a container.",   # what the model reads
+            group=ToolGroup.DOCKER,
+            permission=Permission.DESTRUCTIVE,     # reaches outside NOVA
+            input_model=RestartInput,
+            confirmation_prompt="Restart the container “{container}”?",
+        )
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        payload = narrow(arguments, RestartInput)
+        result = await run(["docker", "restart", payload.container], ...)
+        return ToolResult(content=result.output, data={"container": payload.container})
+```
+
+Then add it to the group's builder. Permission checks, schema validation,
+timeouts, output cleaning, redaction and the audit row all happen in
+`ToolService`, so a tool cannot forget any of them and a new one inherits them
+by existing.
+
+Two rules the registry enforces at startup rather than in review: anything
+that needs confirmation must have a `confirmation_prompt`, and `Permission.WRITE`
+is only valid in the knowledge group. "Restart" is destructive — the test is
+whether being wrong costs something that cannot be taken back, and a restart
+in the middle of a deploy does.

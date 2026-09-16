@@ -1,6 +1,12 @@
 # 005 — Temporal splits for behavioural machine learning
 
-**Status:** Accepted · **Date:** 2026-09-06
+**Status:** ~~Superseded by [015](019-iphone-terminal.md)~~ · **Date:** 2026-09-06 · **Superseded:** 2026-09-16
+
+> The behavioural ML pipeline this governs had device telemetry as its
+> only data source, and that source is gone. Nothing replaced it: NOVA no
+> longer predicts anything. The methodological point — that a random split
+> over time-ordered data leaks the future into the training set — is
+> preserved here against the day something is modelled again.
 
 ## Context
 

@@ -1,9 +1,11 @@
-"""GitHub dev mode, end to end: the owner wires it up, GitHub delivers, the
-device reacts.
+"""GitHub dev mode, end to end: the owner wires it up, GitHub delivers, and
+NOVA records what happened.
 
-The device is a recording transport registered directly on the app's
-connection registry, so the assertion is on the exact frames that would
-have gone down the socket.
+The reaction used to be a face and a spoken line pushed to every connected
+device. There is no device, so it is now recorded on the integration -- which
+is what the iOS settings screen reads. The classifier that decides *what* the
+reaction is did not change, and neither did the refusal ladder in front of
+it, which is most of what these tests are about.
 """
 
 from __future__ import annotations
@@ -15,7 +17,6 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from nova.services.connections import InMemoryConnectionRegistry
 from nova.services.github_webhooks import (
     DELIVERY_HEADER,
     EVENT_HEADER,
@@ -24,32 +25,17 @@ from nova.services.github_webhooks import (
     sign,
 )
 from tests.conftest import build_test_app
-from tests.integration.test_devices import _claim
 
 pytestmark = pytest.mark.integration
 
 
-class RecordingTransport:
-    def __init__(self) -> None:
-        self.frames: list[dict[str, Any]] = []
-
-    async def send_json(self, data: dict[str, object]) -> None:
-        self.frames.append(dict(data))
-
-
 @pytest.fixture
-def registry() -> InMemoryConnectionRegistry:
-    return InMemoryConnectionRegistry()
-
-
-@pytest.fixture
-async def api(settings, engine, session_factory, redis_client, registry):  # type: ignore[no-untyped-def]
+async def api(settings, engine, session_factory, redis_client):  # type: ignore[no-untyped-def]
     app = build_test_app(
         settings,
         engine=engine,
         session_factory=session_factory,
         redis=redis_client,
-        connections=registry,
     )
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://nova.test") as client:
         yield client
@@ -171,98 +157,59 @@ class TestLifecycle:
 
 
 class TestDelivery:
-    async def test_a_green_build_makes_a_happy_face_and_says_so(
-        self, api: AsyncClient, registry: InMemoryConnectionRegistry
-    ) -> None:
+    async def test_a_green_build_is_recorded_in_plain_words(self, api: AsyncClient) -> None:
         headers = await _register(api)
-        device = await _claim(api, headers)
-        transport = RecordingTransport()
-        await registry.register(uuid.UUID(device["id"]), transport)
         created = (await api.post("/api/v1/integrations/github", headers=headers, json={})).json()
 
         response = await deliver(api, created["webhook_url"], created["secret"], green())
         assert response.status_code == 200, response.text
         assert response.json() == {
-            "status": "reacted",
+            "status": "recorded",
             "reason": None,
             "reaction": "ci_passed",
-            "devices_reached": 1,
+            "detail": "Build's green.",
         }
 
-        assert [f["command"] for f in transport.frames] == ["expression.set", "speaker.play"]
-        assert transport.frames[0]["payload"] == {"emotion": "happy", "intensity": 1.0}
-        assert transport.frames[1]["payload"] == {"text": "Build's green.", "emotion": "happy"}
-        # Real protocol frames, with ids the device can acknowledge.
-        for frame in transport.frames:
-            assert frame["type"] == "robot.command"
-            assert frame["version"] == 1
-            uuid.UUID(frame["id"])
-
+        # The sentence was written to be spoken aloud by a robot. It reads
+        # just as well on the settings screen, which is where it goes now.
         read = (await api.get("/api/v1/integrations/github", headers=headers)).json()
-        assert read["last_event"] == "workflow_run:success"
+        assert read["last_event"] == "Build's green."
         assert read["last_delivery_at"] is not None
 
-    async def test_a_red_build_is_confused(
-        self, api: AsyncClient, registry: InMemoryConnectionRegistry
-    ) -> None:
+    async def test_a_red_build_is_classified_differently(self, api: AsyncClient) -> None:
         headers = await _register(api)
-        device = await _claim(api, headers)
-        transport = RecordingTransport()
-        await registry.register(uuid.UUID(device["id"]), transport)
         created = (await api.post("/api/v1/integrations/github", headers=headers, json={})).json()
 
         response = await deliver(api, created["webhook_url"], created["secret"], red())
+
         assert response.json()["reaction"] == "ci_failed"
-        assert transport.frames[0]["payload"]["emotion"] == "confused"
+        assert response.json()["detail"] != "Build's green."
 
-    async def test_an_offline_device_is_skipped_not_queued(self, api: AsyncClient) -> None:
-        headers = await _register(api)
-        await _claim(api, headers)  # claimed, never connected
-        created = (await api.post("/api/v1/integrations/github", headers=headers, json={})).json()
+    async def test_a_delivery_for_one_owner_does_not_touch_another(self, api: AsyncClient) -> None:
+        """Two accounts, two integrations, one delivery.
 
-        response = await deliver(api, created["webhook_url"], created["secret"], green())
-        assert response.status_code == 200
-        assert response.json()["status"] == "reacted"
-        assert response.json()["devices_reached"] == 0
-
-    async def test_every_connected_device_reacts(
-        self, api: AsyncClient, registry: InMemoryConnectionRegistry
-    ) -> None:
-        headers = await _register(api)
-        transports = []
-        for _ in range(2):
-            device = await _claim(api, headers)
-            transport = RecordingTransport()
-            await registry.register(uuid.UUID(device["id"]), transport)
-            transports.append(transport)
-        created = (await api.post("/api/v1/integrations/github", headers=headers, json={})).json()
-
-        response = await deliver(api, created["webhook_url"], created["secret"], green())
-        assert response.json()["devices_reached"] == 2
-        assert all(len(t.frames) == 2 for t in transports)
-
-    async def test_the_owner_of_another_device_is_not_reached(
-        self, api: AsyncClient, registry: InMemoryConnectionRegistry
-    ) -> None:
+        The webhook URL carries an integration id and nothing else, so this
+        is the test that the id is the only thing consulted -- the other
+        account's integration must be untouched.
+        """
         mine = await _register(api)
         theirs = await _register(api)
-        their_device = await _claim(api, theirs)
-        transport = RecordingTransport()
-        await registry.register(uuid.UUID(their_device["id"]), transport)
         created = (await api.post("/api/v1/integrations/github", headers=mine, json={})).json()
+        await api.post("/api/v1/integrations/github", headers=theirs, json={})
 
         await deliver(api, created["webhook_url"], created["secret"], green())
-        assert transport.frames == []
+
+        assert (await api.get("/api/v1/integrations/github", headers=mine)).json()[
+            "last_delivery_at"
+        ] is not None
+        assert (await api.get("/api/v1/integrations/github", headers=theirs)).json()[
+            "last_delivery_at"
+        ] is None
 
 
 class TestRefusals:
-    async def test_a_bad_signature_is_401_and_nothing_moves(
-        self, api: AsyncClient, registry: InMemoryConnectionRegistry
-    ) -> None:
+    async def test_a_bad_signature_is_401_and_nothing_is_recorded(self, api: AsyncClient) -> None:
         headers = await _register(api)
-        device = await _claim(api, headers)
-        transport = RecordingTransport()
-        await registry.register(uuid.UUID(device["id"]), transport)
         created = (await api.post("/api/v1/integrations/github", headers=headers, json={})).json()
 
         for signature in ("", "sha256=" + "0" * 64, sign("wrong", json.dumps(green()).encode())):
@@ -270,7 +217,10 @@ class TestRefusals:
                 api, created["webhook_url"], created["secret"], green(), signature=signature
             )
             assert response.status_code == 401
-        assert transport.frames == []
+
+        # Refused before anything is written: last_delivery_at stays null.
+        read = (await api.get("/api/v1/integrations/github", headers=headers)).json()
+        assert read["last_delivery_at"] is None
 
     async def test_a_tampered_body_is_401(self, api: AsyncClient) -> None:
         headers = await _register(api)
@@ -309,13 +259,8 @@ class TestRefusals:
         )
         assert response.status_code == 413
 
-    async def test_a_replayed_delivery_is_ignored(
-        self, api: AsyncClient, registry: InMemoryConnectionRegistry
-    ) -> None:
+    async def test_a_replayed_delivery_is_ignored(self, api: AsyncClient) -> None:
         headers = await _register(api)
-        device = await _claim(api, headers)
-        transport = RecordingTransport()
-        await registry.register(uuid.UUID(device["id"]), transport)
         created = (await api.post("/api/v1/integrations/github", headers=headers, json={})).json()
 
         first = await deliver(
@@ -324,14 +269,14 @@ class TestRefusals:
         again = await deliver(
             api, created["webhook_url"], created["secret"], green(), delivery="same-id"
         )
-        assert first.json()["status"] == "reacted"
+
+        assert first.json()["status"] == "recorded"
         assert again.json() == {
             "status": "ignored",
             "reason": "duplicate delivery",
             "reaction": None,
-            "devices_reached": 0,
+            "detail": None,
         }
-        assert len(transport.frames) == 2  # once, not twice
 
     async def test_a_disabled_integration_acknowledges_and_ignores(self, api: AsyncClient) -> None:
         headers = await _register(api)
@@ -359,7 +304,7 @@ class TestRefusals:
         response = await deliver(
             api, created["webhook_url"], created["secret"], green("hsilviu05/nova")
         )
-        assert response.json()["status"] == "reacted"
+        assert response.json()["status"] == "recorded"
 
     async def test_ping_and_unknown_events_are_200(self, api: AsyncClient) -> None:
         # GitHub sends a ping on creation, and retries anything non-2xx.

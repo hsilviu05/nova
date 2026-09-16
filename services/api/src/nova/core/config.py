@@ -103,62 +103,136 @@ class SecuritySettings(BaseModel):
     argon2_parallelism: int = Field(default=1, ge=1)
 
 
-class DeviceSettings(BaseModel):
-    """Device provisioning and connection configuration."""
+class ProjectTarget(BaseModel):
+    """A service NOVA can be asked about by name.
 
-    # A claim code is read off a small screen and typed by hand, so it cannot
-    # carry much entropy (~29 bits). Everything else here exists to
-    # compensate: a short life, a single use, and rate limiting on the claim
-    # endpoint -- which is the only place a wrong guess is observable, since
-    # a guess that matches no code matches no row either.
-    claim_code_ttl_seconds: int = Field(default=600, ge=60, le=3600)
+    The whole definition is a name and a base URL, because that is all a
+    health check needs. Anything richer -- credentials, per-project probes --
+    would make this a deployment descriptor, and NOVA is not a deploy tool.
+    """
 
-    # Provisioning is a rare event, so the limits are deliberately tight.
-    provision_rate_limit_attempts: int = Field(default=10, ge=1)
-    provision_rate_limit_window_seconds: int = Field(default=3600, ge=1)
-    claim_rate_limit_attempts: int = Field(default=10, ge=1)
-    claim_rate_limit_window_seconds: int = Field(default=60, ge=1)
+    name: str = Field(min_length=1, max_length=48)
+    base_url: str
+    health_path: str = "/health"
+    description: str | None = None
 
-    # How often a connected device is expected to report in.
-    heartbeat_interval_seconds: int = Field(default=30, ge=5)
+    @field_validator("base_url")
+    @classmethod
+    def _require_http(cls, value: str) -> str:
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("base_url must start with http:// or https://")
+        return value.rstrip("/")
 
-    # Frames larger than this are rejected before parsing. A device sends
-    # small JSON; anything bigger is a bug or an attack.
-    max_frame_bytes: int = Field(default=16384, ge=512)
-    # Consecutive malformed frames tolerated before the socket is closed.
-    max_protocol_violations: int = Field(default=5, ge=1)
+
+class ToolSettings(BaseModel):
+    """What NOVA is allowed to do to the machine it runs on.
+
+    Every default here is the conservative one. Turning a group on is a
+    deliberate act by the person who owns the machine, and nothing the model
+    says can change these values -- they are read from the environment at
+    startup and never from a prompt.
+    """
+
+    # Groups are opt-out rather than opt-in only where the tool cannot reach
+    # outside the API process. Anything that shells out starts disabled.
+    system_enabled: bool = True
+    docker_enabled: bool = False
+    git_enabled: bool = True
+    github_enabled: bool = False
+    projects_enabled: bool = True
+    memory_tools_enabled: bool = True
+
+    # Shell execution is the one tool that can do anything at all, so it is
+    # off, and even when on it runs only what is named below. An empty
+    # allowlist with shell enabled is a configuration that can run nothing,
+    # which is the correct reading of "enabled but unspecified".
+    shell_enabled: bool = False
+    shell_allowlist: list[str] = Field(default_factory=list)
+
+    # Directories the filesystem-shaped tools (git, disk usage) may look at.
+    # A path outside every root is refused before any process is spawned, so
+    # a model that invents "/etc" gets an error rather than a listing.
+    workspace_roots: list[str] = Field(default_factory=list)
+
+    # A tool that has not answered in this long is killed. Local commands are
+    # fast; anything slower is hung, and a hung tool holds a chat turn open.
+    command_timeout_seconds: float = Field(default=15.0, gt=0, le=120)
+    # Tool output goes into a prompt, so its size is a cost and a risk.
+    # Truncation is visible in the result rather than silent.
+    max_output_bytes: int = Field(default=8000, ge=256, le=200_000)
+
+    # How long a confirmation for a non-read tool stays valid. Short: a
+    # confirmation is an answer to a question asked seconds ago.
+    confirmation_ttl_seconds: int = Field(default=180, ge=30, le=3600)
+
+    # Rounds of tool use inside a single reply. Two is enough for "check
+    # something, then answer about it"; more is an agent looping, which is
+    # explicitly out of scope for the first version.
+    max_tool_rounds: int = Field(default=3, ge=0, le=10)
+
+    tool_rate_limit: int = Field(default=60, ge=1)
+    tool_rate_limit_window_seconds: int = Field(default=60, ge=1)
+
+
+class IntegrationSettings(BaseModel):
+    """Credentials and addresses for things outside this machine."""
+
+    # Read-only use only: NOVA never pushes, merges, or comments. The token
+    # is unwrapped inside the GitHub adapter and never reaches a prompt.
+    github_token: SecretStr | None = None
+    github_api_url: str = "https://api.github.com"
+    # Blank means "whoever the token belongs to".
+    github_owner: str | None = None
+
+    projects: list[ProjectTarget] = Field(default_factory=list)
+
+    # Seconds to wait on an outbound integration call.
+    request_timeout_seconds: float = Field(default=8.0, gt=0, le=60)
 
 
 class AISettings(BaseModel):
     """AI provider configuration.
 
-    ``offline`` needs no credential and is the default, so the stack starts
-    and the tests run without a key. Selecting ``anthropic`` without one
-    degrades back to offline with a warning rather than refusing to boot.
+    Local first: ``ollama`` is the intended provider for a NOVA running on
+    someone's own machine. ``offline`` needs no service at all and is the
+    default, so the stack starts and the tests run with nothing installed.
+    Selecting a provider that is not configured degrades back to offline with
+    a warning rather than refusing to boot -- a terminal that will not start
+    tells you nothing, while one that starts and says the model is missing
+    tells you exactly what is wrong.
     """
 
-    chat_provider: Literal["anthropic", "ollama", "offline"] = "offline"
-    chat_model: str = "claude-opus-5"
-    anthropic_api_key: SecretStr | None = None
+    chat_provider: Literal["ollama", "openai_compatible", "anthropic", "offline"] = "offline"
 
     # A local model through Ollama, running natively on the host -- not in
     # the compose stack, where it could not reach the GPU. From inside the
     # api container the host is host.docker.internal; on the host itself it
     # is localhost. Nothing leaves the machine.
+    #
+    # Whatever is chosen must support tool calling: `ollama show <model>`
+    # lists it under capabilities. That is not a preference any more -- a
+    # model without it narrates running a command instead of running one,
+    # which reads as NOVA claiming to have checked something it never looked
+    # at. The provider is asked and stops offering tools when the answer is
+    # no, but it cannot make a model capable.
+    chat_model: str = "qwen2.5:7b"
     ollama_base_url: str = "http://localhost:11434"
-    # Apache-2.0, good at structured JSON (memory extraction needs it), and
-    # about 5 GB at the default quantisation -- it leaves a 24 GB machine
-    # room for Docker, Postgres and the API. See ADR 014 for the step up.
-    ollama_model: str = "qwen2.5:7b"
-    # Ollama unloads an idle model after five minutes by default. A desk
-    # companion is talked to sporadically, so that default would put a cold
-    # load of tens of gigabytes in front of most replies.
+    # Ollama unloads an idle model after five minutes by default. A terminal
+    # is talked to sporadically, so that default would put a cold load of
+    # several gigabytes in front of most replies.
     ollama_keep_alive: str = "30m"
 
+    # Any server speaking the OpenAI chat-completions wire format --
+    # llama.cpp, vLLM, LM Studio, or Ollama's compatibility endpoint.
+    openai_base_url: str = "http://127.0.0.1:11434/v1"
+    openai_api_key: SecretStr | None = None
+
+    anthropic_api_key: SecretStr | None = None
+
     request_timeout_seconds: float = Field(default=60.0, gt=0)
-    # Replies from a desk companion are a few sentences. A generous cap
-    # would only pay for a runaway.
-    max_reply_tokens: int = Field(default=600, ge=64, le=8192)
+    # Replies here are longer than a companion's: a terminal answer often
+    # carries a command, a short listing, or a stack trace.
+    max_reply_tokens: int = Field(default=1500, ge=64, le=8192)
     # Turns of history sent with each request. Enough for continuity,
     # bounded so cost does not grow without limit as a conversation ages.
     context_window_messages: int = Field(default=20, ge=2, le=200)
@@ -169,7 +243,10 @@ class AISettings(BaseModel):
 
     # "lexical" measures shared vocabulary; "hash" is content-addressed and
     # carries no similarity at all, kept only for storage-plumbing tests.
-    embedding_provider: Literal["lexical", "hash"] = "lexical"
+    # "openai_compatible" reaches a local embedding server, which only works
+    # if that model's width matches the column -- see the registry.
+    embedding_provider: Literal["lexical", "hash", "openai_compatible"] = "lexical"
+    embedding_model: str = "nomic-embed-text"
     # Must match the memories column; see nova.models.memory.
     embedding_dimensions: int = Field(default=1536, ge=64, le=4096)
 
@@ -235,7 +312,8 @@ class Settings(BaseSettings):
     redis: RedisSettings = Field(default_factory=RedisSettings)
     jwt: JWTSettings
     security: SecuritySettings = Field(default_factory=SecuritySettings)
-    device: DeviceSettings = Field(default_factory=DeviceSettings)
+    tools: ToolSettings = Field(default_factory=ToolSettings)
+    integrations: IntegrationSettings = Field(default_factory=IntegrationSettings)
     ai: AISettings = Field(default_factory=AISettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
 

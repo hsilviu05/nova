@@ -9,13 +9,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from nova.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from nova.models.conversation import Conversation
-from nova.models.device import Device
 from nova.models.memory import Memory
 from nova.models.refresh_token import RefreshToken
+from nova.models.tool_invocation import ToolInvocation
 
 
 class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
-    """A person who owns NOVA devices, conversations, and memories."""
+    """A person who owns a NOVA: their conversations, memories, and tool history."""
 
     __tablename__ = "users"
     __table_args__ = (
@@ -30,9 +30,9 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     display_name: Mapped[str] = mapped_column(String(80), nullable=False)
 
-    # IANA name, e.g. "Europe/Bucharest". Analytics buckets telemetry by local
-    # hour, and doing that in UTC would put someone's evening in the middle of
-    # their night. Stored as a name rather than an offset so Postgres resolves
+    # IANA name, e.g. "Europe/Bucharest". Activity is bucketed by local hour,
+    # and doing that in UTC would put someone's evening in the middle of their
+    # night. Stored as a name rather than an offset so Postgres resolves
     # daylight saving itself: a fixed offset is wrong for half the year
     # everywhere that observes it.
     timezone: Mapped[str] = mapped_column(
@@ -48,17 +48,17 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    devices: Mapped[list[Device]] = relationship(
-        back_populates="owner",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-    )
     conversations: Mapped[list[Conversation]] = relationship(
         back_populates="owner",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
     memories: Mapped[list[Memory]] = relationship(
+        back_populates="owner",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    tool_invocations: Mapped[list[ToolInvocation]] = relationship(
         back_populates="owner",
         cascade="all, delete-orphan",
         passive_deletes=True,

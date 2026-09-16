@@ -1,6 +1,14 @@
 # 004 — WebSocket, not MQTT, for the device protocol
 
-**Status:** Accepted · **Date:** 2026-09-06
+**Status:** ~~Superseded by [013](017-tool-system-and-permissions.md)~~ · **Date:** 2026-09-06 · **Superseded:** 2026-09-16
+
+> NOVA has no device. The bidirectional channel this ADR chose existed to
+> carry telemetry up and behaviour commands down to an ESP32; both halves
+> are gone. What replaced the downward half is the tool system, and the
+> reasoning here still applies to it in one respect worth keeping: a
+> command sent to something that acts on the world needs a versioned,
+> strictly validated schema, and NOVA's tool inputs are Pydantic models
+> for the same reason this protocol was validated frame by frame.
 
 ## Context
 

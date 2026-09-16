@@ -10,16 +10,24 @@ The webhook endpoint is the only unauthenticated public URL in the API, so
     5. the integration is disabled                -> 200, ignored
     6. it is for a repository we do not watch     -> 200, ignored
     7. the event is not one NOVA reacts to        -> 200, ignored
-    8. otherwise: a face and a sentence, to every connected device
+    8. otherwise: the reaction is recorded on the integration
 
 Everything after the signature is a 200. GitHub retries non-2xx responses
 with backoff for days, and "not interested" is not a reason to be retried.
 
-What a delivery does *not* do is write telemetry. The dataset contract
-(ADR 013) has two sources, the device and the phone, and a build result is
-neither: it is something that happened to the owner, not something NOVA
-observed. Folding it in would change what the ML label means. If GitHub
-events ever become a feature, that is a third source and its own decision.
+Where the reaction *goes* changed when NOVA stopped being a robot. It used to
+be a facial expression and a spoken line pushed to every connected device
+over the WebSocket. There is no device and no socket, so it is now recorded
+on the integration row -- ``last_event`` and ``last_delivery_at``, which the
+iOS settings screen already reads and shows.
+
+The classifier in ``github_webhooks`` is unchanged and still produces a
+``line``: a short human sentence about what happened. That sentence was
+written to be spoken aloud, and it reads just as well on a screen.
+
+What a delivery still does *not* do is write telemetry. A build result is
+something that happened to the owner, not something NOVA observed, and the
+audit log is specifically a record of what NOVA itself ran.
 """
 
 from __future__ import annotations
@@ -39,7 +47,6 @@ from nova.core.clock import utc_now
 from nova.core.config import Settings
 from nova.core.errors import AuthenticationError, NotFoundError, PayloadTooLargeError
 from nova.models.github_integration import GitHubIntegration
-from nova.repositories.device import DeviceRepository
 from nova.repositories.github_integration import GitHubIntegrationRepository
 from nova.schemas.github import (
     GitHubIntegrationCreated,
@@ -47,20 +54,12 @@ from nova.schemas.github import (
     GitHubIntegrationUpdate,
     WebhookAck,
 )
-from nova.schemas.protocol import (
-    ExpressionCommand,
-    ExpressionPayload,
-    SpeakCommand,
-    SpeakPayload,
-)
-from nova.services.connections import ConnectionRegistry
 from nova.services.github_webhooks import (
     DELIVERY_HEADER,
     EVENT_HEADER,
     MAX_BODY_BYTES,
     SIGNATURE_HEADER,
     Ignored,
-    Reaction,
     react,
     repository_full_name,
     verify_signature,
@@ -81,14 +80,10 @@ class GitHubIntegrationService:
         self,
         *,
         integrations: GitHubIntegrationRepository,
-        devices: DeviceRepository,
-        connections: ConnectionRegistry,
         redis: Redis,
         settings: Settings,
     ) -> None:
         self._integrations = integrations
-        self._devices = devices
-        self._connections = connections
         self._redis = redis
         self._settings = settings
 
@@ -216,15 +211,13 @@ class GitHubIntegrationService:
             )
             return WebhookAck(status="ignored", reason=outcome.reason)
 
-        reached = await self._dispatch(integration.user_id, outcome)
-        await self._integrations.record_delivery(integration, at=now, event=outcome.summary)
+        await self._integrations.record_delivery(integration, at=now, event=outcome.line)
         logger.info(
             "github_reaction",
             integration_id=str(integration_id),
             reaction=outcome.kind,
-            devices_reached=reached,
         )
-        return WebhookAck(status="reacted", reaction=outcome.kind, devices_reached=reached)
+        return WebhookAck(status="recorded", reaction=outcome.kind, detail=outcome.line)
 
     # -- internals --------------------------------------------------------------
 
@@ -232,8 +225,9 @@ class GitHubIntegrationService:
         """True the first time a delivery id is seen; False on a replay.
 
         Fails open on a Redis outage, the same way the rate limiter does:
-        the worst a replay can do is repeat a facial expression, and that
-        is not worth refusing every delivery until Redis is back.
+        the worst a replay can do is rewrite ``last_event`` with the same
+        sentence, and that is not worth refusing every delivery until Redis
+        is back.
         """
         key = f"github:delivery:{integration_id}:{delivery_id[:128]}"
         try:
@@ -242,22 +236,6 @@ class GitHubIntegrationService:
             logger.warning("github_dedupe_unavailable", error=str(exc))
             return True
         return bool(stored)
-
-    async def _dispatch(self, user_id: uuid.UUID, reaction: Reaction) -> int:
-        """Send the face and the line to every connected device the user
-        owns. Offline devices are skipped, not queued: a "build's green"
-        that arrives when the device reconnects an hour later is noise."""
-        reached = 0
-        for device in await self._devices.list_for_owner(user_id):
-            face = ExpressionCommand(
-                payload=ExpressionPayload(emotion=reaction.emotion, intensity=1.0)
-            )
-            if not await self._connections.send(device.id, face.model_dump(mode="json")):
-                continue
-            line = SpeakCommand(payload=SpeakPayload(text=reaction.line, emotion=reaction.emotion))
-            await self._connections.send(device.id, line.model_dump(mode="json"))
-            reached += 1
-        return reached
 
     def _read(self, integration: GitHubIntegration) -> GitHubIntegrationRead:
         path = WEBHOOK_PATH.format(integration_id=integration.id)

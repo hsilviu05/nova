@@ -10,14 +10,21 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from nova.ai.base import ChatCompletion, ChatRequest, TokenUsage
+from nova.ai.base import (
+    ChatCompletion,
+    ChatRequest,
+    StreamCompleted,
+    StreamEvent,
+    TextDelta,
+    TokenUsage,
+)
 from nova.ai.lexical_embeddings import LexicalEmbeddingProvider
 from nova.core.clock import utc_now
 from nova.core.config import AISettings
@@ -50,12 +57,20 @@ class RememberingProvider:
     def model(self) -> str:
         return "remembering-model"
 
+    @property
+    def supports_tools(self) -> bool:
+        return False
+
+    async def aclose(self) -> None:
+        return None
+
     def _is_extraction(self, request: ChatRequest) -> bool:
         return request.system.startswith("You extract")
 
-    async def stream(self, request: ChatRequest) -> AsyncIterator[str]:
+    async def stream(self, request: ChatRequest) -> AsyncGenerator[StreamEvent, None]:
         self.contexts.append(request.context)
-        yield "Understood."
+        yield TextDelta("Understood.")
+        yield StreamCompleted(stop_reason="end_turn", model=self.model)
 
     async def complete(self, request: ChatRequest) -> ChatCompletion:
         if self._is_extraction(request):
@@ -704,6 +719,9 @@ class TestDegradedRetrieval:
 
             async def embed(self, texts: list[str]) -> list[list[float]]:
                 raise RuntimeError("embedding backend is down")
+
+            async def aclose(self) -> None:
+                return None
 
         app = build_test_app(
             settings,

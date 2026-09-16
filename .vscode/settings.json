@@ -1,0 +1,42 @@
+{
+  // The API's virtualenv. Without this, Pylance falls back to the system
+  // Python and reports every third-party import -- jwt, argon2, fastapi,
+  // sqlalchemy -- as unresolved, which looks like dozens of errors in code
+  // that is fine.
+  "python.defaultInterpreterPath": "${workspaceFolder}/services/api/.venv/bin/python",
+
+  // The package lives in src/ and is reached through an editable install.
+  // Stated explicitly because that install is fragile on this machine: macOS
+  // sets UF_HIDDEN on the .pth file when the checkout sits in an
+  // iCloud-synced folder, and Python 3.13+ skips hidden .pth files. With
+  // this line the editor resolves `nova` regardless.
+  "python.analysis.extraPaths": ["${workspaceFolder}/services/api/src"],
+  "python.analysis.typeCheckingMode": "standard",
+
+  // mypy runs strict in CI and is the authority on types; Pylance is here
+  // for navigation and fast feedback, not to enforce a second, different
+  // standard.
+  "python.analysis.diagnosticSeverityOverrides": {
+    "reportMissingTypeStubs": "none"
+  },
+
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.cwd": "${workspaceFolder}/services/api",
+  "python.testing.pytestArgs": ["tests"],
+
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit"
+    }
+  },
+
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.mypy_cache": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true
+  }
+}

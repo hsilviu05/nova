@@ -28,28 +28,34 @@ MODELS_DIR = Path(__file__).resolve().parent.parent / "apps/ios/NOVA/Models"
 MODELS = {
     "User": "UserRead",
     "TokenPair": "TokenPair",
-    "Device": "DeviceRead",
-    "TelemetryEvent": "TelemetryRead",
-    "CommandAccepted": "CommandAccepted",
     "Conversation": "ConversationRead",
     "ConversationDetail": "ConversationDetail",
     "ChatMessage": "MessageRead",
     "Memory": "MemoryRead",
     "MemoryPage": "MemoryPage",
     "MemorySearchResult": "MemorySearchResult",
-    "Analytics": "AnalyticsRead",
-    "Insights": "InsightsRead",
-    "Insight": "InsightRead",
-    "Coverage": "CoverageRead",
-    "HourBucket": "HourBucket",
-    "DayBucket": "DayBucket",
-    "WeekdayHourBucket": "WeekdayHourBucket",
-    "BatteryPoint": "BatteryPoint",
-    "EventTypeBucket": "EventTypeBucket",
-    "Gap": "GapRead",
+    "SystemStatus": "SystemStatus",
+    "AIStatus": "AIStatus",
+    "HostStatus": "HostStatus",
+    "DependencyStatus": "DependencyStatus",
+    "ProjectStatus": "ProjectStatus",
+    "MemoryStatus": "MemoryStatus",
+    "ToolsStatus": "ToolsStatus",
+    "ActivityEntry": "ActivityEntry",
+    "ActivityPage": "ActivityPage",
+    "NovaTool": "ToolRead",
+    "ToolList": "ToolListResponse",
+    "ToolRunResult": "ToolResultRead",
     "GitHubIntegration": "GitHubIntegrationRead",
     "GitHubIntegrationCreated": "GitHubIntegrationCreated",
 }
+
+# Swift structs whose names differ from the schema's, where the *field* names
+# also differ because the Swift one is written for a screen rather than for
+# the wire. Checked by hand instead, which is what these notes are.
+#
+#   NovaTool.id      -- computed from `name`, not a field on the wire.
+#   ToolRunResult    -- `data` is JSONValue, `tool` is the schema's `tool`.
 
 
 def camel(name: str) -> str:
@@ -77,18 +83,6 @@ def stored_properties(sources: str, struct: str) -> set[str] | None:
     return set(re.findall(r"^    let (\w+):", match.group(1), re.M))
 
 
-def swift_emotions(sources: str) -> set[str]:
-    """Cases of the Expression enum, which mirrors a server Literal."""
-    match = re.search(r"enum Expression\b[^{]*\{(.*?)\n    \}", sources, re.S)
-    if match is None:
-        return set()
-
-    cases: set[str] = set()
-    for line in re.findall(r"^\s*case (.+)$", match.group(1), re.M):
-        cases.update(part.strip() for part in line.split(","))
-    return {case for case in cases if case}
-
-
 def swift_memory_categories(sources: str) -> set[str]:
     """Cases of MemoryCategory, which mirrors a server Literal.
 
@@ -109,16 +103,16 @@ def swift_memory_categories(sources: str) -> set[str]:
 
 
 def swift_nested_enum_cases(sources: str, outer: str, inner: str) -> set[str]:
-    """Cases of an enum nested inside a struct, e.g. Insight.Confidence."""
-    outer_body = re.search(
-        rf"^struct {outer}\b[^{{]*\{{(.*?)^\}}", sources, re.S | re.M
-    )
+    """Cases of an enum nested inside a struct, e.g. NovaTool.Permission.
+
+    ``unknown`` is excluded where present: it is the app's own fallback for a
+    value a newer server sends, not something the API ever emits.
+    """
+    outer_body = re.search(rf"^struct {outer}\b[^{{]*\{{(.*?)^\}}", sources, re.S | re.M)
     if outer_body is None:
         return set()
 
-    match = re.search(
-        rf"enum {inner}\b[^{{]*\{{(.*?)\n    \}}", outer_body.group(1), re.S
-    )
+    match = re.search(rf"enum {inner}\b[^{{]*\{{(.*?)\n    \}}", outer_body.group(1), re.S)
     if match is None:
         return set()
 
@@ -128,7 +122,9 @@ def swift_nested_enum_cases(sources: str, outer: str, inner: str) -> set[str]:
     # A `switch self` inside the enum has `case` lines too. Declarations are
     # bare identifiers; switch arms start with a dot or carry a colon.
     return {
-        case for case in cases if case and not case.startswith(".") and ":" not in case
+        case
+        for case in cases
+        if case and not case.startswith(".") and ":" not in case and case != "unknown"
     }
 
 
@@ -194,14 +190,6 @@ def main() -> int:
 
         ok = ok and not (missing or unknown)
 
-    expression = (
-        schemas.get("ExpressionPayload", {}).get("properties", {}).get("emotion", {})
-    )
-    server_emotions = set(expression.get("enum", []))
-    app_emotions = swift_emotions(sources)
-
-    ok = check_enum("emotions", server_emotions, app_emotions) and ok
-
     # The categories the app offers have to be exactly the ones the API will
     # accept, or a correction saved from the picker comes back a 422.
     update_category = (
@@ -218,16 +206,16 @@ def main() -> int:
         and ok
     )
 
-    # Confidence is a server Literal too. A value the app cannot decode
-    # fails the whole insights response, not one card.
-    confidence = (
-        schemas.get("InsightRead", {}).get("properties", {}).get("confidence", {})
-    )
+    # The permission levels the app renders badges for. A tool the app
+    # believes is read-only when the server calls it destructive would show
+    # no warning before somebody pressed it, which is the failure this
+    # catches.
+    permission = schemas.get("ToolRead", {}).get("properties", {}).get("permission", {})
     ok = (
         check_enum(
-            "confidence",
-            set(confidence.get("enum", [])),
-            swift_nested_enum_cases(sources, "Insight", "Confidence"),
+            "permissions",
+            set(permission.get("enum", [])),
+            swift_nested_enum_cases(sources, "NovaTool", "Permission"),
         )
         and ok
     )

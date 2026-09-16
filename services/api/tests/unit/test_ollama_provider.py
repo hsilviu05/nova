@@ -3,6 +3,11 @@
 No network. ``httpx.MockTransport`` plays the server, so the tests check the
 exact request the adapter sends and how it treats what comes back -- which
 is where an adapter's bugs live.
+
+``stream`` yields *events* rather than strings: a reply can now contain a
+request to run a tool, and a consumer has to be able to tell that from text.
+``text_of`` below drops the terminal completion event and unwraps the rest,
+so the assertions read the way they did before the interface changed.
 """
 
 from __future__ import annotations
@@ -15,7 +20,14 @@ from typing import Any
 import httpx
 import pytest
 
-from nova.ai.base import ChatMessage, ChatRequest
+from nova.ai.base import (
+    ChatMessage,
+    ChatRequest,
+    StreamCompleted,
+    StreamEvent,
+    TextDelta,
+    ToolCallRequested,
+)
 from nova.ai.errors import AIConfigurationError, AIProviderError, AIUnavailableError
 from nova.ai.ollama_provider import OllamaChatProvider
 
@@ -58,6 +70,11 @@ class Server:
         return json.loads(self.requests[-1].content)
 
 
+def text_of(events: list[StreamEvent]) -> list[str]:
+    """The visible text, in order, ignoring completion and tool events."""
+    return [e.text for e in events if isinstance(e, TextDelta)]
+
+
 def provider(server: Server, **kw: Any) -> OllamaChatProvider:
     return OllamaChatProvider(
         base_url="http://ollama.test:11434",
@@ -86,6 +103,9 @@ class TestRequestShape:
         assert sent["model"] == "qwen2.5:32b"
         assert sent["stream"] is True
         assert sent["options"] == {"num_predict": 123}
+        # No tools offered means the key is absent, not an empty list: some
+        # servers treat [] as "tools are in play" and change the prompt.
+        assert "tools" not in sent
         assert sent["keep_alive"] == "30m"
         roles = [m["role"] for m in sent["messages"]]
         assert roles == ["system", "user"]
@@ -113,20 +133,67 @@ class TestStreaming:
     async def test_yields_chunks_in_order_and_stops_at_done(self) -> None:
         server = Server(body=stream_reply("Hel", "lo", " there"))
         async with aclosing(provider(server).stream(REQUEST)) as chunks:
-            assert [c async for c in chunks] == ["Hel", "lo", " there"]
+            events = [c async for c in chunks]
+
+        assert text_of(events) == ["Hel", "lo", " there"]
+        # The turn ends with an explicit completion event. Without one, "the
+        # model has nothing more to say" and "the connection died" look
+        # identical to the tool loop.
+        assert isinstance(events[-1], StreamCompleted)
+        assert events[-1].stop_reason == "end_turn"
 
     async def test_empty_chunks_are_not_yielded(self) -> None:
         # Ollama sends an empty content on the final frame; the consumer
         # must not receive a spurious "" token.
         server = Server(body=stream_reply("a", "", "b"))
         async with aclosing(provider(server).stream(REQUEST)) as chunks:
-            assert [c async for c in chunks] == ["a", "b"]
+            assert text_of([c async for c in chunks]) == ["a", "b"]
+
+    async def test_a_tool_call_arrives_as_its_own_event(self) -> None:
+        """The reason the stream yields events at all.
+
+        Flattening this into the text would put the difference between "NOVA
+        said this" and "NOVA wants to do this" back into a parser, where
+        malformed output could forge a call.
+        """
+        body = ndjson(
+            [
+                {"message": {"content": "Checking."}, "done": False},
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "function": {
+                                    "name": "system_health",
+                                    "arguments": {"verbose": True},
+                                },
+                            }
+                        ],
+                    },
+                    "done": True,
+                    "done_reason": "stop",
+                },
+            ]
+        )
+        async with aclosing(provider(Server(body=body)).stream(REQUEST)) as chunks:
+            events = [c async for c in chunks]
+
+        calls = [e.call for e in events if isinstance(e, ToolCallRequested)]
+        assert text_of(events) == ["Checking."]
+        assert len(calls) == 1
+        assert calls[0].name == "system_health"
+        assert calls[0].arguments == {"verbose": True}
+        assert calls[0].id == "call_1"
 
     async def test_a_corrupt_line_is_a_provider_error_not_a_dropped_chunk(self) -> None:
         body = ndjson([{"message": {"content": "ok"}, "done": False}]) + b"{not json\n"
         server = Server(body=body)
         async with aclosing(provider(server).stream(REQUEST)) as chunks:
-            assert await anext(chunks) == "ok"
+            first = await anext(chunks)
+            assert isinstance(first, TextDelta)
+            assert first.text == "ok"
             with pytest.raises(AIProviderError):
                 await anext(chunks)
 
@@ -135,7 +202,9 @@ class TestStreaming:
         # connection must be released quietly, not turned into an error.
         server = Server(body=stream_reply("one", "two", "three"))
         gen = provider(server).stream(REQUEST)
-        assert await anext(gen) == "one"
+        first = await anext(gen)
+        assert isinstance(first, TextDelta)
+        assert first.text == "one"
         await gen.aclose()
 
 

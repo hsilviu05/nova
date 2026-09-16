@@ -1,6 +1,13 @@
 # 012 — Aggregation in SQL, and insights that refuse to guess
 
-**Status:** Accepted · **Date:** 2026-09-06
+**Status:** ~~Superseded by [015](019-iphone-terminal.md)~~ · **Date:** 2026-09-06 · **Superseded:** 2026-09-16
+
+> The analytics this describes aggregated device telemetry, which no
+> longer exists. Two of its conclusions were carried forward rather than
+> discarded: timezone bucketing still happens in Postgres in the owner's
+> IANA zone, and NOVA still declines to state something it cannot support
+> — which is now a rule in the system prompt and a tool that reports a
+> failure rather than inventing a reading.
 
 ## Context
 

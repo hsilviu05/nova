@@ -1,400 +1,486 @@
 # NOVA
 
-**Multimodal AI Companion, Physical Robot & Behavioral Intelligence Platform**
+**A local-first personal AI terminal that remembers what you teach it and can
+safely interact with your development environment.**
 
-NOVA is a small 3D-printed creature that sits on a desk. It sees, hears,
-speaks, moves, remembers, and reacts — and while it does, it produces a
-structured record of its own behaviour. That record is the point.
+An old iPhone in a stand on the desk, a FastAPI backend on the Mac beside it,
+and a model that never leaves the network. Ask it what is running, what broke,
+what you worked on yesterday, and what it remembers about you — and let it
+check, rather than guess.
 
-Most AI-pet projects stop at "it talks". NOVA is also a **data collection
-platform**: weeks of real telemetry from a real device, feeding a real
-machine-learning pipeline that predicts when its owner will next interact
-with it.
+```
+                    ┌─────────────────────┐
+                    │     OLD iPHONE      │
+                    │                     │
+                    │   NOVA (SwiftUI)    │
+                    │                     │
+                    │ Dashboard           │
+                    │ Chat + voice        │
+                    │ Memory              │
+                    │ Tools               │
+                    └──────────┬──────────┘
+                               │
+                      HTTP / SSE over Wi-Fi
+                               │
+                    ┌──────────▼──────────┐
+                    │      NOVA API       │
+                    │      FastAPI        │
+                    │                     │
+                    │ Conversations       │
+                    │ Semantic memory     │
+                    │ Tool orchestration  │
+                    │ Audit log           │
+                    └──────────┬──────────┘
+                               │
+          ┌────────────────────┼────────────────────┐
+          │                    │                    │
+          ▼                    ▼                    ▼
+       Ollama            PostgreSQL              Tools
+    (or any local          + pgvector              │
+     model server)                                 ├─ System
+                                                   ├─ Docker
+                                                   ├─ Git
+                                                   ├─ GitHub
+                                                   ├─ Projects
+                                                   └─ Memory
+```
 
-> **Status: Phases 1–8 of 10, unevenly.** The backend — API, persistence,
-> auth, the device platform, conversational AI, semantic memory, analytics,
-> and the ML pipeline — is built, tested, and running. The firmware's core is
-> tested on a host; its device layer has never been compiled and nothing has
-> run on hardware. The iOS client is written but has never been compiled. The
-> ML pipeline has trained nothing, by rule: no synthetic data, and there is no
-> device yet. See [Roadmap](#roadmap) for exactly what exists today.
+The phone is a terminal, not a compute node. It authenticates, renders, and
+listens; everything else happens on the machine under the desk.
 
 ---
 
 ## Table of contents
 
 - [Why this exists](#why-this-exists)
+- [What it does](#what-it-does)
 - [Architecture](#architecture)
-- [What is built today](#what-is-built-today)
 - [Quick start](#quick-start)
+- [Connecting the iPhone](#connecting-the-iphone)
 - [The API](#the-api)
-- [Authentication design](#authentication-design)
-- [Hardware](#hardware)
-- [Data and machine learning](#data-and-machine-learning)
+- [The tool system](#the-tool-system)
+- [Memory](#memory)
+- [Security](#security)
 - [Repository layout](#repository-layout)
 - [Testing](#testing)
-- [Roadmap](#roadmap)
+- [What's next](#whats-next)
 - [Documentation](#documentation)
+- [History](#history)
+- [License](#license)
 
 ---
 
 ## Why this exists
 
-A chatbot in a plastic shell is a demo. What makes a companion device
-interesting is that it occupies a fixed point in someone's day and can
-therefore *observe* — when they arrive, how long they work, when they go
-quiet. That produces genuinely novel behavioural data, and behavioural data
-supports genuine prediction.
+Everything a developer needs to know about their own machines is already
+somewhere: in `docker ps`, in a health endpoint, in a git log, in a GitHub
+tab, in their own head. The cost is not that the information is missing — it
+is that answering "is SnapWorth up?" means finding a terminal, remembering the
+command, and reading the output.
 
-So NOVA is built as three cooperating systems:
+NOVA is a screen that is already on, that you can ask.
 
-| System | Role |
-|---|---|
-| **Device** | An ESP32-S3 creature with an AMOLED face: microphone, speaker, servos, distance sensor, motion sensor. Senses and reacts, and keeps reacting when the network is gone. |
-| **Backend** | Conversation, semantic memory, telemetry ingestion, analytics, and prediction. The device is thin; this is where the thinking lives. |
-| **iOS app** | Chat, memory management, device control, and the analytics that make the collected data legible. Native SwiftUI, no third-party dependencies. |
+Three commitments shape every decision in this repository:
 
-The LLM never touches GPIO. It emits *intent* — `{"emotion": "curious",
-"action": "look_at_user"}` — and a deterministic behaviour engine turns that
-into servo positions. A language model that can command hardware directly is
-a language model that can break hardware directly.
+**Local-first.** The model runs on your machine through Ollama. Conversations,
+memories and the audit log live in your own Postgres. Cloud providers are
+supported and entirely optional; nothing degrades if you never configure one.
+
+**Privacy-first.** Nothing leaves the network unless you configure something
+that leaves the network. Speech recognition prefers the on-device recogniser.
+Memories are listed, editable and deletable — there is no store of beliefs
+about you that you cannot read.
+
+**Safe by default.** NOVA can inspect your machine. Out of the box it can do
+nothing else: every tool it ships with is read-only, Docker and shell
+execution are switched off, and anything destructive needs you to say yes to
+that specific action, in words, before it happens.
+
+---
+
+## What it does
+
+Ask it things:
+
+> "What's the status of SnapWorth?"
+> "Is my API running?"
+> "What containers are running?"
+> "What did I work on yesterday?"
+> "Show me my recent GitHub activity."
+> "Search my memory for everything about RAG."
+> "Explain the error from my latest deployment."
+> "Remember that I prefer PostgreSQL for new projects."
+> "Forget that."
+
+A worked example, exactly as it happens:
+
+```
+You    Check SnapWorth.
+
+NOVA   Checking SnapWorth…
+       ⟳ project_health
+       ✓ SnapWorth answered 200 (healthy). postgres: ok, redis: ok
+
+NOVA   SnapWorth is healthy. The API answered in 8 ms, and both
+       PostgreSQL and Redis are responding.
+```
+
+And when it wants to change something:
+
+```
+You    Get rid of the nova-test container.
+
+NOVA   I can remove it, but that needs your confirmation.
+
+       ┌──────────────────────────────────────────┐
+       │ Remove the Docker container "nova-test"? │
+       │ This cannot be undone.                   │
+       │                                          │
+       │   [ Yes, do it ]      [ Not now ]        │
+       └──────────────────────────────────────────┘
+```
+
+NOVA cannot press that button. Nothing it says to itself, and nothing anything
+it reads says to it, can press that button either.
+
+---
 
 ## Architecture
 
-```
-                    ┌──────────────────────┐
-                    │      NOVA iOS        │
-                    │   SwiftUI · Swift 6  │
-                    │  chat · memory       │
-                    │  insights · device   │
-                    └──────────┬───────────┘
-                               │ HTTPS / WebSocket
-                    ┌──────────▼───────────┐
-                    │     FASTAPI API      │
-                    │  auth · devices      │
-                    │  memory · analytics  │
-                    │  ML · GitHub         │
-                    └──────────┬───────────┘
-                               │
-              ┌────────────────┼────────────────┐
-              ▼                ▼                ▼
-       PostgreSQL           Redis           AI layer
-       + pgvector        rate limits    ┌──────┼──────┐
-                          + cache       ▼      ▼      ▼
-                                       LLM  Vision  STT/TTS
-                                        └─────┼─────┘
-                                       Behaviour engine
-                                              │ WebSocket
-                                  ┌───────────▼───────────┐
-                                  │    NOVA ESP32-S3      │
-                                  │  AMOLED face · touch  │
-                                  │ mic · speaker · IMU   │
-                                  │   servos · ToF        │
-                                  └───────────────────────┘
-```
+| Layer | What it is | Why |
+| --- | --- | --- |
+| **iOS client** | SwiftUI, Swift 6 strict concurrency | Authenticates, renders, streams, listens. Holds no logic worth duplicating. |
+| **API** | FastAPI, async SQLAlchemy 2.0 | Everything else. Runnable and testable with no phone in sight. |
+| **Model** | Ollama by default | Local. Swappable behind one interface — see [ADR 002](docs/decisions/002-ai-provider-abstraction.md). |
+| **Store** | PostgreSQL 17 + pgvector | Conversations, memories with embeddings, the audit log. |
+| **Cache** | Redis | Rate-limit counters and confirmation tokens. Everything in it is disposable. |
 
-Full detail, including the layering rules the backend follows, is in
-[ARCHITECTURE.md](ARCHITECTURE.md).
+The backend is layered strictly: **routes** own HTTP, **services** own
+decisions, **repositories** own SQL, **models** own schema. A route that
+queries, or a repository that decides, is a bug — see
+[ARCHITECTURE.md](ARCHITECTURE.md) for why the boundaries are where they are.
 
-## What is built today
-
-Phases 1, 2 and 4 delivered a running, tested backend:
-
-- **FastAPI** application with versioned `/api/v1` routes and OpenAPI docs
-- **PostgreSQL 17 + pgvector**, async SQLAlchemy 2.0, Alembic migrations
-- **Redis** for rate limiting
-- **Authentication**: Argon2id password hashing, JWT access tokens, and
-  database-backed refresh tokens with rotation *and reuse detection*
-- **Observability**: structured JSON logs, a request ID on every log line and
-  response, per-request latency
-- **Health probes**: `/health` (liveness) and `/ready` (dependency readiness)
-- **Device claim flow**: the device shows a code on its face, the owner types
-  it into the app, and the device then collects a credential only it can
-  collect
-- **Versioned WebSocket protocol**: authenticated at the handshake, every
-  frame validated against a discriminated union, heartbeat, telemetry
-  ingestion, and owner-issued commands
-- **Conversations**: provider-agnostic AI layer, replies streamed over
-  Server-Sent Events, and a partial reply kept when the provider fails or the
-  client disconnects
-- **288 tests**, 96% branch coverage, `ruff` and `mypy --strict` clean
-
-Phase 3 added the iOS client — sign-in, device claiming by typed code, a home
-screen, and streaming chat — **written but never compiled**, see below.
-
-`scripts/simulate_device.py` drives the entire device lifecycle against a
-running API, so the flow is exercisable before the hardware arrives.
-
-> **On the iOS app.** Everything else here was built and verified in a Linux
-> environment. Swift cannot be: there is no toolchain for it there, and
-> SwiftUI does not build on Linux at all. So the iOS code has never been
-> through a compiler, and the first build will likely need fixes.
->
-> What *is* verified is the part that would otherwise fail silently. Every
-> model and test fixture was written against JSON captured from a running
-> API, and `scripts/check_ios_contract.py` compares the Swift models against
-> the live OpenAPI schema on every CI run — so a backend change that breaks
-> the client fails the build rather than the app.
-
-Everything above is verified running, not scaffolded. What is *not* built yet
-is listed honestly in the [Roadmap](#roadmap).
+---
 
 ## Quick start
 
-Requirements: Docker and Docker Compose. Nothing else.
+Requires Docker, or Python 3.12+ with a PostgreSQL that has pgvector.
 
 ```bash
-git clone <this-repo> nova && cd nova
+git clone https://github.com/hsilviu05/nova.git
+cd nova
+
 cp .env.example .env
-```
-
-Generate the signing secret. The API refuses to start without it — there is
-deliberately no default. The `tr` matters: `openssl` wraps base64 at 64
-characters, and a value split across two lines breaks `.env` parsing.
-
-```bash
 echo "NOVA_JWT__SECRET_KEY=$(openssl rand -base64 48 | tr -d '\n')" >> .env
-```
 
-```bash
 docker compose up --build
 ```
 
-That starts Postgres, Redis, and the API; migrations run automatically before
-the server binds. Then:
+That brings up Postgres, Redis and the API on `http://localhost:8000`, with
+migrations applied. Open `http://localhost:8000/docs`.
+
+At this point NOVA works but has no model: the default provider is `offline`,
+which answers with honest canned lines so the stack runs with nothing
+installed. To give it a brain:
 
 ```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/ready
-open http://localhost:8000/docs
+brew install ollama && ollama serve          # or your preferred install
+ollama pull qwen3.8                          # any model with tool support
+
+# in .env
+NOVA_AI__CHAT_PROVIDER=ollama
+NOVA_AI__CHAT_MODEL=qwen3.8:latest
+NOVA_AI__OLLAMA_BASE_URL=http://host.docker.internal:11434
 ```
 
-Running the API directly on your machine instead is covered in
-[DEVELOPMENT.md](DEVELOPMENT.md).
+> **Pick a model that supports tools.** Ollama reports this — `ollama show
+> <model>` lists `tools` under capabilities. A model without it will describe
+> running a command instead of running one, which reads as NOVA claiming to
+> have checked something it never looked at. NOVA asks the provider and stops
+> offering tools when the answer is no, but it cannot make a model capable.
+
+Then tell it what it is allowed to look at:
+
+```bash
+NOVA_TOOLS__WORKSPACE_ROOTS=["/Users/you/code"]
+NOVA_INTEGRATIONS__PROJECTS=[{"name":"SnapWorth","base_url":"http://localhost:9000"}]
+NOVA_TOOLS__DOCKER_ENABLED=true          # optional
+NOVA_INTEGRATIONS__GITHUB_TOKEN=ghp_...  # optional, read-only scopes
+NOVA_TOOLS__GITHUB_ENABLED=true
+```
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for running the API on the host against
+containerised dependencies, which is the faster loop.
+
+---
+
+## Connecting the iPhone
+
+```bash
+cd apps/ios
+brew install xcodegen && xcodegen generate
+open NOVA.xcodeproj
+```
+
+Build to the phone, then in the app: **Settings → NOVA server** and enter the
+address of the Mac on your network — `http://192.168.1.20:8000`, or
+`http://your-mac.local:8000`.
+
+Three things worth knowing:
+
+- **`127.0.0.1` is the phone.** The default build address only works in the
+  simulator. The Settings screen says so when it is still set.
+- **Plain HTTP works on your own network and nowhere else.** The app declares
+  `NSAllowsLocalNetworking`, which covers private and link-local addresses and
+  `.local` names — and refuses to save an `http://` address outside them,
+  rather than saving one that silently never connects.
+- **iOS will ask for local network permission** the first time. Denying it
+  means the app cannot reach your Mac at all.
+
+For a phone living on a desk: **Settings → Display & Brightness → Auto-Lock →
+Never**, and leave it on the charger. NOVA does nothing to defeat the lock
+screen or keep itself running in the background; the dashboard polls while it
+is on screen and stops when it is not.
+
+---
 
 ## The API
 
-Interactive documentation is at `/docs` (disabled in production).
+`/api/v1`, bearer tokens, one error envelope everywhere.
 
 | Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/health` | Liveness. Touches no dependency. |
-| `GET` | `/ready` | Readiness. Probes Postgres and Redis; 503 if either is down. |
-| `POST` | `/api/v1/auth/register` | Create an account, return a token pair. |
-| `POST` | `/api/v1/auth/login` | Exchange credentials for a token pair. |
-| `POST` | `/api/v1/auth/refresh` | Rotate a refresh token. |
-| `POST` | `/api/v1/auth/logout` | Revoke one session. |
-| `POST` | `/api/v1/auth/logout-all` | Revoke every session for the caller. |
-| `GET` | `/api/v1/users/me` | The authenticated user. |
-| `PATCH` | `/api/v1/users/me` | Update the authenticated user. |
-| `POST` | `/api/v1/devices/provision` | Device-facing. Start provisioning, return a claim code. |
-| `POST` | `/api/v1/devices/provision/poll` | Device-facing. Collect credentials once claimed. |
-| `POST` | `/api/v1/devices/claim` | Adopt the device showing a code. |
-| `GET` | `/api/v1/devices` | List your devices. |
-| `GET` | `/api/v1/devices/{id}` | Device detail, including live status. |
-| `PATCH` | `/api/v1/devices/{id}` | Rename a device. |
-| `DELETE` | `/api/v1/devices/{id}` | Remove a device and revoke its credentials. |
-| `GET` | `/api/v1/devices/{id}/telemetry` | Recent telemetry. |
-| `POST` | `/api/v1/devices/{id}/commands` | Send a command to a connected device. |
-| `WS` | `/api/v1/devices/ws` | The device connection. |
-| `GET` | `/api/v1/conversations` | List your conversations. |
-| `POST` | `/api/v1/conversations` | Start a conversation. |
-| `GET` | `/api/v1/conversations/{id}` | A conversation and its messages. |
-| `DELETE` | `/api/v1/conversations/{id}` | Delete a conversation. |
-| `POST` | `/api/v1/conversations/{id}/messages` | Send a message, wait for the reply. |
-| `POST` | `/api/v1/conversations/{id}/stream` | Send a message, stream the reply (SSE). |
-| `GET` | `/api/v1/memories` | What NOVA remembers about you. |
-| `GET` | `/api/v1/memories/search` | Search memories by meaning, with scores. |
-| `PATCH` | `/api/v1/memories/{id}` | Correct a memory. Editing the text re-embeds it. |
-| `DELETE` | `/api/v1/memories/{id}` | Forget one thing. |
-| `DELETE` | `/api/v1/memories` | Forget everything, without deleting the account. |
-| `GET` | `/api/v1/devices/{id}/analytics` | Aggregated telemetry, bucketed in your local hours. |
-| `GET` | `/api/v1/devices/{id}/insights` | What the telemetry supports saying — or why it doesn't. |
+| --- | --- | --- |
+| `POST` | `/auth/register` · `/auth/login` | Account and tokens |
+| `POST` | `/auth/refresh` · `/auth/logout` · `/auth/logout-all` | Session lifecycle |
+| `GET`/`PATCH` | `/users/me` | Profile |
+| `GET`/`POST` | `/conversations` | List and start threads |
+| `GET`/`DELETE` | `/conversations/{id}` | Read and remove one |
+| `POST` | `/conversations/{id}/messages` | Send and wait (no tools) |
+| `POST` | `/conversations/{id}/stream` | Send and stream (tools run here) |
+| `GET` | `/memories` · `/memories/search` | What NOVA remembers |
+| `PATCH`/`DELETE` | `/memories/{id}` | Correct or forget one |
+| `DELETE` | `/memories` | Forget everything |
+| `GET` | `/tools` | What NOVA can do here |
+| `POST` | `/tools/invoke` | Run one, with confirmation if needed |
+| `GET` | `/system/status` | The dashboard, in one response |
+| `GET` | `/system/activity` | The audit log |
+| `GET` | `/health` · `/ready` | Probes, outside the version prefix |
 
-Every non-2xx response uses one envelope, always carrying the request ID that
-appears in the server logs:
+Every failure is the same shape:
 
 ```json
 {
   "error": {
-    "code": "invalid_credentials",
-    "message": "Incorrect email or password.",
-    "request_id": "4fac82f6-44f2-4420-bd5c-c9283658c7d2",
-    "details": {}
+    "code": "tool_confirmation_required",
+    "message": "Remove the Docker container “nova-test”? This cannot be undone.",
+    "request_id": "9f2c…",
+    "details": { "tool": "docker_remove_container", "confirmation_token": "…" }
   }
 }
 ```
 
-## Authentication design
+`code` is stable and machine-readable; `message` is for a person. Branch on the
+first, show the second. `request_id` matches the `X-Request-ID` header and the
+server logs, so a screenshot of an error is enough to find it.
 
-Two token types, chosen for different reasons.
+Streaming is Server-Sent Events: `message`, `delta`, `tool`, `tool_result`,
+`confirm`, `done`, `error`. Clients ignore event types they do not know, so the
+server can add one without breaking an older build.
 
-**Access token** — a 15-minute JWT. Stateless, so verifying it costs no
-database round trip. The algorithm is pinned at verification time; accepting
-the token's own `alg` header is the classic JWT confusion vulnerability, and
-there is a test that specifically forges an `alg: none` token.
+---
 
-**Refresh token** — a 384-bit opaque random string, stored only as a SHA-256
-digest. Opaque because a refresh token must be *revocable*, and a stateless
-JWT cannot be revoked before it expires. SHA-256 rather than Argon2 because
-the input is full-entropy random data, so there is nothing for a slow KDF to
-defend against.
+## The tool system
 
-Refresh tokens rotate on every use and are grouped into a **family** — every
-token descended from one login. Presenting a token that was already rotated
-means someone is holding a copy they should not:
+A tool is a name, a description, a JSON Schema, a permission, and an
+`execute`. Everything NOVA can do to a machine goes through that interface,
+because it is the only place a permission can be checked, an argument
+validated, and an invocation recorded.
 
-```
-login ──► token A
-             │ refresh
-             ▼
-          token B          (A is now revoked)
-             │
-   attacker replays A  ──► entire family revoked, B dies too
-```
+| Group | Tools | Default |
+| --- | --- | --- |
+| **System** | `system_health`, `system_resources`, `running_processes`, `disk_usage` | on |
+| **Git** | `git_status`, `git_log`, `git_diff` | on |
+| **Knowledge** | `memory_search`, `memory_create`, `memory_update`, `memory_delete` | on |
+| **Projects** | `project_list`, `project_health` | on, if any are configured |
+| **Docker** | `docker_status`, `docker_containers`, `docker_logs`, `docker_remove_container` | **off** |
+| **GitHub** | `github_repositories`, `github_recent_commits`, `github_pull_requests`, `github_issues` | **off** |
+| **Developer** | `execute_shell_command` | **off**, and allowlisted even then |
 
-Silent theft becomes a detected, contained event. Both the attacker and the
-legitimate user are forced to re-authenticate, which is the correct outcome:
-the alternative is an attacker refreshing quietly forever.
+Three permission levels, and the line between the last two is where the
+security model lives:
 
-More in [SECURITY.md](SECURITY.md).
+- **`read`** — no side effects. Runs whenever asked, including mid-reply.
+- **`write`** — changes something *NOVA itself owns*, reversibly, visible in
+  the app. In practice that means memory, and the registry refuses to
+  register a `write` tool in any other group. Runs without confirmation,
+  because NOVA already writes memories on its own from ordinary conversation.
+- **`destructive`** — everything else. Always needs a person to approve that
+  specific call, with those specific arguments.
 
-## Hardware
+The confirmation is a token: NOVA proposes, the server describes what would
+happen and mints a token bound to the account, the tool and the arguments, and
+only a request carrying that token runs anything. It is single use and expires
+in three minutes. **The model never sees it.**
 
-Roughly €100–118 all in. Full list with quantities and buying notes in
-[`hardware/BOM.md`](hardware/BOM.md).
+---
 
-| Part | Choice | Why |
-|---|---|---|
-| Controller | Waveshare ESP32-S3-Touch-AMOLED-2.06 | 410×502 AMOLED touch face, **microphone, speaker, and ES8311 codec on board**, plus a 6-axis IMU and RTC. One board is the face, the ears, and the voice. |
-| Movement | 3× SG90 micro servo | Head yaw and pitch. The third is because SG90 gears strip. |
-| Servo driver | PCA9685 over I²C | **Required.** The controller reserves only I²C, UART, and USB pads — there is no free PWM GPIO. |
-| Distance | VL53L0X time-of-flight | Presence, approach, and dwell. This is what emits `person_detected`. |
-| Power | USB-C, plus a separate 5 V rail for servos | **No battery in V1.** Servos never draw from the board's regulator. |
+## Memory
 
-**NOVA has no camera.** In this class of hardware a camera and a display are
-mutually exclusive — both want the same pins — so the choice was sight or a
-face. The face won: emotional presence is the product, an AMOLED's true black
-makes drawn eyes read as a face rather than a screen, and ESP32-class vision
-was always going to mean streaming frames to the backend at a few fps.
+NOVA forms beliefs about you from what you say, stores them as pgvector
+embeddings, and retrieves them before it answers. It is the feature that makes
+it worth talking to twice.
 
-Crucially this costs nothing in the data-science story, because presence and
-distance come from the time-of-flight sensor rather than from vision. The
-reasoning, and what it would take to add a camera later, is in
-[ADR 008](docs/decisions/008-amoled-face-hardware.md).
+It is also the feature that would be unnerving without the rest of it: every
+memory is listed in the app with its category, importance, confidence, and the
+conversation it came from. Every one can be edited — which re-embeds it, so
+retrieval follows the correction rather than the original — or deleted. "Forget
+everything" is one button and does exactly that.
 
-The body is ~12–15 cm, printed on a Bambu Lab printer. Not humanoid — a
-small futuristic creature, original design. V1 does **not** walk: legged
-locomotion costs most of the mechanical budget and buys the least. An
-expressive face, voice, movement, and telemetry come first.
+Extraction runs *after* a reply is delivered, never in the request path, and
+refuses to store anything credential-shaped even if the model tries.
 
-Design files land in [`hardware/`](hardware/) during Phase 6.
+The default embedder is lexical: a hashed bag of word and character n-grams, so
+cosine similarity measures **shared vocabulary**. It genuinely retrieves and
+needs nothing installed. Its ceiling is real — it does not know "espresso"
+relates to "coffee" — and pointing it at a local embedding server is
+configuration plus a re-embedding pass. See
+[ADR 011](docs/decisions/011-lexical-embeddings-and-memory-extraction.md).
 
-## Data and machine learning
+---
 
-The device emits structured telemetry:
+## Security
 
-```json
-{
-  "timestamp": "2026-09-06T19:32:14Z",
-  "device_id": "nova-001",
-  "event": "person_detected",
-  "source": "time_of_flight",
-  "distance_cm": 72,
-  "head_rotation": 14,
-  "emotion": "curious",
-  "session_id": "abc123"
-}
-```
+NOVA has hands. [SECURITY.md](SECURITY.md) is the long version; the short one:
 
-Weeks of that is a real dataset. The first ML problem is deliberately modest
-and genuinely useful:
+- Argon2id passwords, short-lived access JWTs, opaque rotating refresh tokens
+  with reuse detection.
+- Every tool call is audited — successes, failures, refusals, and whether the
+  model or a person asked. Arguments are stored redacted.
+- Tools never shell out through a shell. `execve` with an argv array, a
+  stripped environment that contains no NOVA secret, a timeout, and bounded
+  output.
+- Filesystem tools are confined to configured roots, resolved through
+  symlinks before the check.
+- Tool output is treated as hostile input: secrets redacted, control sequences
+  stripped, turn-marker impersonation defanged, and delivered inside a labelled
+  block the output cannot close.
+- The real bound is capability, not prompting. An injection that fully succeeds
+  gets NOVA to run a different **read-only** tool, because that is all the chat
+  path admits.
 
-> **Will the user interact with NOVA in the next 10 minutes?**
+Found something? See [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
-Features come from time of day, day of week, time since last interaction,
-recent interaction counts, session durations, proximity, and device state.
-Models progress from logistic regression to random forest to gradient
-boosting, evaluated on precision, recall, F1, ROC-AUC, and a confusion
-matrix.
-
-Splits are **temporal, never random**. Behavioural data is a time series;
-shuffling it lets the model learn from its own future and produces a score
-that means nothing. See [ADR 005](docs/decisions/005-ml-temporal-split.md).
-
-**No synthetic data.** The dataset comes from the device or the ML phase does
-not begin. Manufacturing a plausible CSV to demonstrate a pipeline proves
-only that the pipeline runs.
+---
 
 ## Repository layout
 
 ```
-nova/
-├── apps/ios/               Native SwiftUI client             (Phase 3)
-├── services/api/           FastAPI backend                   ✅ Phase 1
-├── firmware/nova-esp32/    ESP-IDF firmware, C++             (Phase 2/6)
-├── ml/                     Dataset, features, training, registry ✅ Phase 8
-├── hardware/               CAD, electronics, assembly        (Phase 6)
-├── infrastructure/         Docker and deployment
-├── docs/
-│   ├── architecture/
-│   ├── api/
-│   ├── decisions/          Architecture Decision Records
-│   └── hardware/
-├── scripts/
-├── docker-compose.yml
-└── .env.example
+apps/ios/            SwiftUI client
+  NOVA/App/            composition root, navigation
+  NOVA/Core/           networking, SSE, Keychain, server settings
+  NOVA/Features/       Dashboard, Chat, Memory, Tools, Voice, Settings
+  NOVA/Models/         wire types, mirrored from the OpenAPI schema
+  NOVATests/           decoding, contract and model tests
+
+services/api/        FastAPI backend
+  src/nova/ai/         provider interfaces and adapters
+  src/nova/tools/      the tool system: base, registry, safety, adapters
+  src/nova/api/        routes and dependency wiring
+  src/nova/services/   business logic
+  src/nova/repositories/  SQL
+  src/nova/models/     ORM
+  alembic/             migrations
+  tests/               unit and integration
+
+ml/                  dataset, features, split and training -- dormant, see below
+deploy/              single-host production: Caddy, backups, release images
+docs/decisions/      architecture decision records, including superseded ones
+docs/                security review, performance numbers, deployment guide
+scripts/             contract checks, load check, dependency auditing
 ```
+
+---
 
 ## Testing
 
 ```bash
 cd services/api
-pytest                                    # 96 tests
-pytest --cov=nova --cov-report=term-missing
+pytest                       # 443 tests, real Postgres and Redis
+mypy                         # strict
 ruff check . && ruff format --check .
-mypy
+
+cd ../../apps/ios
+xcodebuild -scheme NOVA -destination 'platform=iOS Simulator,name=iPhone 17' test
 ```
 
-The suite runs against **real PostgreSQL and Redis**, not in-memory fakes.
-The things most likely to break — the unique index behind reuse detection,
-`ON DELETE CASCADE`, partial indexes, `INET` columns — do not exist in
-SQLite, so a SQLite suite would pass while production failed.
+Integration tests run against a real PostgreSQL and Redis rather than
+in-memory fakes, because the things most likely to break — the unique index
+behind reuse detection, `ON DELETE CASCADE`, partial indexes, pgvector
+distance — do not exist in SQLite.
 
-Failure paths are tested as deliberately as happy paths: wrong passwords,
-unknown accounts, expired tokens, replayed tokens, deactivated users, forged
-signatures, malformed payloads, a concurrent-registration race, and Redis
-being unreachable.
+The suite needs no API key and no model server: the offline provider is a
+first-class implementation, not a mock. The tests that exercise tool safety
+run **real processes**, because a test that mocks `create_subprocess_exec`
+proves the code calls a function, not that a branch named `; rm -rf ~` is
+harmless.
 
-## Roadmap
+`scripts/check_ios_contract.py` compares every Swift model against the
+OpenAPI schema. The iOS app cannot be compiled without a macOS runner, so it
+is the one automated check standing between a backend schema change and a
+client that silently decodes the wrong thing.
 
-| Phase | Scope | Status |
-|---|---|---|
-| **1** | Backend foundation: API, Postgres, Redis, Docker, migrations, auth, logging | ✅ **Complete** |
-| **2** | Device platform: claim flow, device auth, WebSocket protocol, telemetry | ✅ **Complete** |
-| **3** | iOS foundation: SwiftUI app, auth, device claiming, home screen | ⚠️ **Written, not compiled** |
-| **4** | AI chat: provider abstraction, conversations, streaming | ✅ **Backend complete** — Anthropic, local Ollama, or offline; iOS uncompiled |
-| **5** | Semantic memory: extraction, embeddings, pgvector retrieval | ✅ **Backend complete**, iOS uncompiled |
-| **6** | Physical robot: servos, animated AMOLED face, audio, proximity, IMU | ⏳ **Core, drivers, face and ESP-IDF layer written**; the core is tested, the device layer is uncompiled, and nothing has run on hardware |
-| **7** | Telemetry and analytics: aggregation, insights screen | ✅ **Backend complete**, iOS uncompiled |
-| **8** | Machine learning: dataset, features, temporal validation, predictions | ✅ **Pipeline complete and tested**; trains nothing until real telemetry exists |
-| **9** | GitHub dev mode: webhooks, CI reactions | ✅ **Backend complete** — signed webhook, replay-safe, reacts on the desk; iOS uncompiled |
-| **10** | Production hardening: security review, performance, deployment | ✅ **Complete** — reviewed and fixed, measured before and after, single-host compose with TLS and backups; the stack has not yet run on a public host |
+---
 
-Each phase ends with something that runs, not something that compiles.
+## What's next
+
+Deliberately not built yet, and each for a reason:
+
+- **Conversation search.** The retrieval is there; the UI is not.
+- **A real embedder.** Lexical retrieval works and has a ceiling.
+- **Local Whisper.** The `SpeechRecogniser` protocol exists precisely so this
+  is a new file rather than a refactor.
+- **Push notifications.** "Tell me when the deploy fails" needs a scheduler
+  and an APNs certificate, which is a project of its own.
+- **Multiple servers.** One address, one account, today.
+
+Explicitly **not** planned: autonomous agents that run unattended, unrestricted
+shell access, multi-agent orchestration, Kubernetes, public deployment.
+
+---
 
 ## Documentation
 
-| Document | Contents |
-|---|---|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Layering, request flow, schema conventions |
-| [SECURITY.md](SECURITY.md) | Threat model, auth design, privacy posture |
-| [DEVELOPMENT.md](DEVELOPMENT.md) | Local setup, migrations, testing, troubleshooting |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Commit conventions, code standards, review |
-| [docs/security-review.md](docs/security-review.md) | Findings, severity, what was fixed and what was not done |
+| Document | What is in it |
+| --- | --- |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Layering, the unit of work, error handling, the tool system |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | Setup, migrations, testing, troubleshooting |
+| [SECURITY.md](SECURITY.md) | Threat model, what is implemented, what is not |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Commits, branches, standards |
+| [docs/security-review.md](docs/security-review.md) | Self-review findings; predates the tool system |
 | [docs/performance.md](docs/performance.md) | What was measured, before and after |
-| [docs/deployment.md](docs/deployment.md) | Single-host production: TLS, release images, backups, restore drill |
-| [docs/decisions/](docs/decisions/) | Architecture Decision Records |
+| [docs/deployment.md](docs/deployment.md) | Single-host production: TLS, release images, backups |
+| [docs/decisions/](docs/decisions/) | ADRs, including the ones this refactor superseded |
+
+---
+
+## History
+
+NOVA began as a physical desk companion: an ESP32-S3 with an AMOLED face, two
+servos and a distance sensor, and a backend built to provision it, speak its
+WebSocket protocol, and do behavioural analytics on its telemetry.
+
+That version is gone. The refactor to a phone-first terminal removed the
+firmware, the hardware, the device tables and the telemetry pipeline, and kept
+what turned out to be the actual product: the memory system, the conversation
+engine, the provider abstraction, and the security work underneath all three.
+
+The ADRs from that period are still in `docs/decisions/`, marked superseded.
+They are kept because the reasoning still explains why several things are
+shaped the way they are — the provider interface, the refresh-token rotation,
+the pgvector schema — and because a decision log that quietly deletes the
+decisions that did not last is not a log.
+
+---
 
 ## License
 

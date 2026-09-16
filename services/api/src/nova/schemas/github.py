@@ -60,7 +60,10 @@ class WebhookAck(BaseModel):
     else, and "we chose not to react" is not something to retry.
     """
 
-    status: Literal["reacted", "ignored"]
+    status: Literal["recorded", "ignored"]
     reason: str | None = None
     reaction: str | None = None
-    devices_reached: int = 0
+    # The sentence NOVA recorded against the integration. It used to be
+    # spoken aloud by a device; it is now what the settings screen shows
+    # under "last event".
+    detail: str | None = None
