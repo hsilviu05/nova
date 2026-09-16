@@ -1,6 +1,6 @@
 # 002 — Abstract AI providers behind interfaces
 
-**Status:** Accepted · **Date:** 2026-09-06
+**Status:** Accepted · **Date:** 2026-09-06 · **Amended:** 2026-09-16 — see [Amendment](#amendment-2026-09-16)
 
 ## Context
 
@@ -54,3 +54,37 @@ speech models are the most likely privacy-driven substitution.
   features need either a deliberate interface extension or an explicit escape
   hatch; this is the real cost of the decision.
 - One extra indirection layer to read through when debugging.
+
+
+## Amendment (2026-09-16)
+
+This is the ADR the refactor vindicated, so it is worth recording what it
+actually bought.
+
+NOVA moved from cloud-first to local-first — the default provider is now
+Ollama on the same machine as the API. That change was **two new files and one
+`match` arm**: `ai/ollama_provider.py`, `ai/openai_compatible.py`, and two
+cases in the registry. No service, route, or test that is about conversations
+was touched, because none of them had ever seen a vendor type.
+
+Two amendments to the interface itself, both forced by tool use rather than by
+a change of vendor:
+
+**Streaming yields events, not strings.** A reply is no longer only text: the
+model may ask to run a tool partway through. Flattening that into the text
+stream would have put the distinction between "NOVA said this" and "NOVA wants
+to do this" back into a parser, where malformed output could forge a tool
+call.
+
+**Providers declare whether they support tools.** Adding this was not
+obviously necessary — every current adapter except the offline one returns
+`True`. It earns its place on the day somebody points NOVA at a model that
+does not: `qwen2.5-coder:7b` emits a tool call as *text* in its reply, and
+without the flag NOVA would hand it definitions and pass its narration through
+as prose. The failure mode is a terminal that describes checking something it
+never checked, which is worse than one that cannot check at all.
+
+The one prediction in the original that did not hold is the emphasis. Vision
+and speech were expected to be the volatile interfaces. Speech ended up on the
+phone, vision was never built, and the interface that actually moved — twice —
+was chat.

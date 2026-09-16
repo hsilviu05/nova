@@ -8,10 +8,10 @@ Conventional Commits, scoped by component:
 feat(api): initialize FastAPI architecture
 feat(auth): implement JWT authentication with refresh rotation
 fix(auth): commit family revocation before raising on token reuse
-feat(device): add device registration
+feat(tools): add the docker capability group
 feat(memory): add semantic memory retrieval
 test(auth): cover deactivated accounts and expired tokens
-docs(adr): record the temporal-split decision
+docs(adr): record why tool output is treated as hostile
 ```
 
 Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`, `build`,
@@ -24,7 +24,7 @@ to read one commit and know what changed and why. If the body needs to explain
 ## Branches
 
 ```
-feat/device-websocket-protocol
+feat/docker-tool-group
 fix/refresh-token-rollback
 docs/architecture-diagrams
 ```
@@ -32,14 +32,21 @@ docs/architecture-diagrams
 ## Before opening a pull request
 
 ```bash
-cd services/api
-ruff check . && ruff format --check .
-mypy
-pytest
-alembic check
+./scripts/check.sh
 ```
 
-All of these run in CI. Running them locally is faster than waiting.
+That runs everything CI runs, in the same order: declared dependencies, lint,
+format, types, tests, migration drift, and the iOS contract check. Running it
+locally is faster than pushing and waiting.
+
+If you touched the Swift client, build it too — CI does, but on a slow macOS
+runner:
+
+```bash
+cd apps/ios && xcodegen generate
+xcodebuild -project NOVA.xcodeproj -scheme NOVA \
+  -destination 'platform=iOS Simulator,name=iPhone 17' test
+```
 
 ## Code standards
 
