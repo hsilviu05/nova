@@ -63,6 +63,22 @@ class MemoryRepository(BaseRepository):
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def list_recent(self, owner_id: uuid.UUID, *, limit: int = 3) -> list[Memory]:
+        """The newest memories, for the dashboard's "recently learned" card.
+
+        Ordered by creation rather than importance, unlike
+        :meth:`list_for_owner`: the question this answers is "what has NOVA
+        picked up lately", and the most important thing it knows is usually
+        something it learned months ago.
+        """
+        stmt = (
+            select(Memory)
+            .where(Memory.user_id == owner_id)
+            .order_by(desc(Memory.created_at))
+            .limit(limit)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
     async def count_for_owner(self, owner_id: uuid.UUID, *, category: str | None = None) -> int:
         stmt = select(func.count()).select_from(Memory).where(Memory.user_id == owner_id)
         if category is not None:

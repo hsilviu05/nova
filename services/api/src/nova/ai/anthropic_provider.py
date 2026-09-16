@@ -13,7 +13,17 @@ from typing import Any
 import anthropic
 from anthropic import AsyncAnthropic
 
-from nova.ai.base import ChatCompletion, ChatMessage, ChatRequest, TokenUsage
+from nova.ai.base import (
+    ChatCompletion,
+    ChatMessage,
+    ChatRequest,
+    StreamCompleted,
+    StreamEvent,
+    TextDelta,
+    TokenUsage,
+    ToolCall,
+    ToolCallRequested,
+)
 from nova.ai.errors import (
     AIConfigurationError,
     AIProviderError,
@@ -21,6 +31,7 @@ from nova.ai.errors import (
     AIUnavailableError,
 )
 from nova.core.logging import get_logger
+from nova.tools.safety import wrap_tool_output
 
 logger = get_logger(__name__)
 
@@ -64,10 +75,20 @@ class AnthropicChatProvider:
     def model(self) -> str:
         return self._model
 
+    @property
+    def supports_tools(self) -> bool:
+        return True
+
     # -- requests ---------------------------------------------------------
 
-    async def stream(self, request: ChatRequest) -> AsyncGenerator[str, None]:
-        """Yield reply text as the model produces it.
+    async def stream(self, request: ChatRequest) -> AsyncGenerator[StreamEvent, None]:
+        """Yield reply events as the model produces them.
+
+        Tool calls are read off the *final* message rather than assembled
+        from ``input_json`` deltas. The SDK has already done that assembly by
+        the time the stream drains, and re-doing it here would be a second
+        parser to keep correct for no gain -- the visible text has streamed
+        either way, which is what latency depends on.
 
         Raises:
             AIRefusalError: if the model declined.
@@ -79,7 +100,7 @@ class AnthropicChatProvider:
         try:
             async with self._stream_method()(**params) as stream:
                 async for text in stream.text_stream:
-                    yield text
+                    yield TextDelta(text)
 
                 final = await stream.get_final_message()
         except anthropic.APIStatusError as exc:
@@ -92,6 +113,15 @@ class AnthropicChatProvider:
         if final.stop_reason == "refusal":
             logger.info("ai_refused", model=self._model)
             raise AIRefusalError()
+
+        for call in _tool_calls_from(final):
+            yield ToolCallRequested(call)
+
+        yield StreamCompleted(
+            stop_reason=final.stop_reason,
+            usage=_usage_from(final),
+            model=final.model,
+        )
 
     async def complete(self, request: ChatRequest) -> ChatCompletion:
         """Return a whole reply.
@@ -115,13 +145,13 @@ class AnthropicChatProvider:
         return ChatCompletion(
             text="".join(block.text for block in message.content if block.type == "text"),
             model=message.model,
-            usage=TokenUsage(
-                input_tokens=message.usage.input_tokens,
-                output_tokens=message.usage.output_tokens,
-                cache_read_tokens=getattr(message.usage, "cache_read_input_tokens", 0) or 0,
-            ),
+            usage=_usage_from(message),
+            tool_calls=tuple(_tool_calls_from(message)),
             stop_reason=message.stop_reason,
         )
+
+    async def aclose(self) -> None:
+        await self._client.close()
 
     # -- internals --------------------------------------------------------
 
@@ -165,6 +195,16 @@ class AnthropicChatProvider:
             "output_config": {"effort": request.effort},
         }
 
+        if request.tools:
+            params["tools"] = [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.input_schema,
+                }
+                for tool in request.tools
+            ]
+
         if self._enable_fallbacks:
             # Route around a refusal by category rather than maintaining a
             # model list of our own.
@@ -174,7 +214,44 @@ class AnthropicChatProvider:
         return params
 
     @staticmethod
-    def _as_param(message: ChatMessage) -> dict[str, str]:
+    def _as_param(message: ChatMessage) -> dict[str, Any]:
+        """Render one NOVA turn in the Messages API's content-block form.
+
+        Tool results go in a *user* turn as ``tool_result`` blocks, which is
+        what the API expects -- there is no tool role here, unlike the
+        OpenAI-shaped formats.
+        """
+        if message.tool_results:
+            return {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": result.call_id,
+                        "content": wrap_tool_output(
+                            result.name, result.content, is_error=result.is_error
+                        ),
+                        "is_error": result.is_error,
+                    }
+                    for result in message.tool_results
+                ],
+            }
+
+        if message.tool_calls:
+            blocks: list[dict[str, Any]] = []
+            if message.content:
+                blocks.append({"type": "text", "text": message.content})
+            blocks.extend(
+                {
+                    "type": "tool_use",
+                    "id": call.id,
+                    "name": call.name,
+                    "input": call.arguments,
+                }
+                for call in message.tool_calls
+            )
+            return {"role": message.role, "content": blocks}
+
         return {"role": message.role, "content": message.content}
 
     @staticmethod
@@ -199,3 +276,27 @@ class AnthropicChatProvider:
 
         logger.error("ai_request_failed", status=exc.status_code)
         return AIProviderError()
+
+
+def _tool_calls_from(message: Any) -> list[ToolCall]:
+    """The tool_use blocks of a finished message."""
+    return [
+        ToolCall(
+            id=block.id,
+            name=block.name,
+            # The SDK types this as object because a tool's schema is the
+            # tool's own business. Anything that is not a mapping is not a
+            # usable call, so it is dropped rather than passed along empty.
+            arguments=dict(block.input) if isinstance(block.input, dict) else {},
+        )
+        for block in message.content
+        if block.type == "tool_use"
+    ]
+
+
+def _usage_from(message: Any) -> TokenUsage:
+    return TokenUsage(
+        input_tokens=message.usage.input_tokens,
+        output_tokens=message.usage.output_tokens,
+        cache_read_tokens=getattr(message.usage, "cache_read_input_tokens", 0) or 0,
+    )

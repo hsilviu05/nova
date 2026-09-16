@@ -24,15 +24,18 @@ from nova.db.redis import create_redis
 from nova.db.session import create_engine, create_session_factory
 from nova.middleware.errors import register_exception_handlers
 from nova.middleware.request_context import RequestContextMiddleware
-from nova.services.connections import InMemoryConnectionRegistry
+from nova.tools.registry import KnowledgeDependencies, build_registry
 
 logger = get_logger(__name__)
 
 DESCRIPTION = """
-NOVA is a physical AI companion and behavioral intelligence platform.
+NOVA is a local-first personal AI terminal.
 
-This API backs the mobile app and the ESP32-S3 device: accounts, devices,
-conversations, semantic memory, telemetry, analytics, and predictions.
+This API is the whole of NOVA apart from its screen: accounts, conversations,
+streaming replies, semantic memory, a permissioned tool system for inspecting
+the machine and the services on it, and the audit log of everything it did.
+
+The iPhone app is a client. Nothing here assumes one is connected.
 """
 
 
@@ -45,33 +48,57 @@ def _build_lifespan(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         engine = create_engine(settings.database)
         redis = create_redis(settings.redis)
+        session_factory = create_session_factory(engine)
 
         app.state.settings = settings
         app.state.engine = engine
-        app.state.session_factory = create_session_factory(engine)
+        app.state.session_factory = session_factory
         app.state.redis = redis
         app.state.token_service = TokenService(settings.jwt)
         app.state.password_hasher = Argon2PasswordHasher(settings.security)
-        # Device sockets are held in this process. Scaling horizontally means
-        # replacing this with a Redis-backed registry -- see ADR 004.
-        app.state.connections = InMemoryConnectionRegistry()
         # One provider for the process: it holds an HTTP client and
         # connection pool that should not be rebuilt per request.
-        app.state.chat_provider = build_chat_provider(settings.ai)
+        chat_provider = build_chat_provider(settings.ai)
         # Built at startup so a width that disagrees with the memories column
         # fails here rather than on the first message someone sends.
-        app.state.embedding_provider = build_embedding_provider(settings.ai)
+        embedding_provider = build_embedding_provider(settings.ai)
+        app.state.chat_provider = chat_provider
+        app.state.embedding_provider = embedding_provider
 
-        logger.info("api_started", version=__version__, environment=settings.environment)
+        # Built once, from configuration, before any request arrives. What
+        # NOVA can do to this machine is decided here and nowhere else.
+        app.state.tool_registry = build_registry(
+            tools=settings.tools,
+            integrations=settings.integrations,
+            knowledge=KnowledgeDependencies(
+                session_factory=session_factory,
+                embeddings=embedding_provider,
+                ai=settings.ai,
+            ),
+        )
+
+        logger.info(
+            "api_started",
+            version=__version__,
+            environment=settings.environment,
+            chat_provider=chat_provider.name,
+            tools=len(app.state.tool_registry),
+        )
         try:
             yield
         finally:
-            # Close in reverse order of acquisition; both must run even if one
-            # raises, or the process can hang on shutdown.
+            # Every acquisition is released, and each in its own try so one
+            # failure cannot skip the rest and hang the process on shutdown.
             try:
-                await redis.aclose()
+                await chat_provider.aclose()
             finally:
-                await engine.dispose()
+                try:
+                    await embedding_provider.aclose()
+                finally:
+                    try:
+                        await redis.aclose()
+                    finally:
+                        await engine.dispose()
             logger.info("api_stopped")
 
     return lifespan

@@ -17,7 +17,14 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from nova.ai.base import ChatCompletion, ChatRequest, TokenUsage
+from nova.ai.base import (
+    ChatCompletion,
+    ChatRequest,
+    StreamCompleted,
+    StreamEvent,
+    TextDelta,
+    TokenUsage,
+)
 from nova.ai.lexical_embeddings import LexicalEmbeddingProvider
 from nova.core.clock import utc_now
 from nova.core.config import AISettings
@@ -50,12 +57,20 @@ class RememberingProvider:
     def model(self) -> str:
         return "remembering-model"
 
+    @property
+    def supports_tools(self) -> bool:
+        return False
+
+    async def aclose(self) -> None:
+        return None
+
     def _is_extraction(self, request: ChatRequest) -> bool:
         return request.system.startswith("You extract")
 
-    async def stream(self, request: ChatRequest) -> AsyncIterator[str]:
+    async def stream(self, request: ChatRequest) -> AsyncIterator[StreamEvent]:
         self.contexts.append(request.context)
-        yield "Understood."
+        yield TextDelta("Understood.")
+        yield StreamCompleted(stop_reason="end_turn", model=self.model)
 
     async def complete(self, request: ChatRequest) -> ChatCompletion:
         if self._is_extraction(request):

@@ -1,9 +1,9 @@
 """What happens when the AI provider misbehaves.
 
 The offline provider always succeeds, so these substitute providers that fail
-in specific ways. These paths matter more than the happy one: a companion
-whose model is rate-limited or which declines a question must still leave the
-conversation in a coherent state.
+in specific ways. These paths matter more than the happy one: a terminal
+whose local model has stopped, or which declines a question, must still leave
+the conversation in a coherent state.
 """
 
 from __future__ import annotations
@@ -17,14 +17,34 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from nova.ai.base import ChatCompletion, ChatRequest, TokenUsage
+from nova.ai.base import (
+    ChatCompletion,
+    ChatRequest,
+    StreamCompleted,
+    StreamEvent,
+    TextDelta,
+    TokenUsage,
+)
 from nova.ai.errors import AIRefusalError, AIUnavailableError
 from tests.conftest import build_test_app
 
 pytestmark = pytest.mark.integration
 
 
-class FailingProvider:
+class _Provider:
+    """The parts of the protocol every double here shares."""
+
+    # None of these doubles can choose a tool, so none of them is offered
+    # any -- which is the same rule the real providers follow.
+    @property
+    def supports_tools(self) -> bool:
+        return False
+
+    async def aclose(self) -> None:
+        return None
+
+
+class FailingProvider(_Provider):
     """Fails before producing anything."""
 
     def __init__(self, error: Exception) -> None:
@@ -38,15 +58,15 @@ class FailingProvider:
     def model(self) -> str:
         return "failing-model"
 
-    async def stream(self, request: ChatRequest) -> AsyncIterator[str]:
+    async def stream(self, request: ChatRequest) -> AsyncIterator[StreamEvent]:
         raise self._error
-        yield ""  # pragma: no cover - unreachable, keeps this a generator
+        yield StreamCompleted()  # pragma: no cover - keeps this a generator
 
     async def complete(self, request: ChatRequest) -> ChatCompletion:
         raise self._error
 
 
-class TruncatingProvider:
+class TruncatingProvider(_Provider):
     """Produces some text, then fails.
 
     The awkward case: the response is already streaming, so the failure
@@ -64,9 +84,9 @@ class TruncatingProvider:
     def model(self) -> str:
         return "truncating-model"
 
-    async def stream(self, request: ChatRequest) -> AsyncIterator[str]:
+    async def stream(self, request: ChatRequest) -> AsyncIterator[StreamEvent]:
         for word in self._text.split():
-            yield word + " "
+            yield TextDelta(word + " ")
         raise AIUnavailableError()
 
     async def complete(self, request: ChatRequest) -> ChatCompletion:
@@ -75,7 +95,7 @@ class TruncatingProvider:
         )
 
 
-class ClosureRecordingProvider:
+class ClosureRecordingProvider(_Provider):
     """Streams a few words and records which task closed the stream.
 
     A generator closed by its consumer runs its ``finally`` in the consumer's
@@ -96,10 +116,10 @@ class ClosureRecordingProvider:
     def model(self) -> str:
         return "recording-model"
 
-    async def stream(self, request: ChatRequest) -> AsyncIterator[str]:
+    async def stream(self, request: ChatRequest) -> AsyncIterator[StreamEvent]:
         try:
             for word in ("I", "was", "about", "to", "say"):
-                yield word + " "
+                yield TextDelta(word + " ")
         finally:
             self.closed_in = asyncio.current_task()
 
@@ -351,11 +371,11 @@ class TestClientDisconnect:
 
         # Read one chunk, then abandon the generator the way a dropped
         # connection does.
-        stream = streamer.stream(conversation_id, turn.history)
+        stream = streamer.stream(conversation_id, owner_id, turn.history)
         first = await anext(stream)
         await stream.aclose()
 
-        assert first
+        assert first.text
 
         async with session_factory() as session:
             stored = (
@@ -374,7 +394,7 @@ class TestClientDisconnect:
         # Whatever NOVA managed to say is what it said; discarding it would
         # leave a question with no answer in the thread the user reopens.
         assert len(stored) == 1
-        assert stored[0].content == first
+        assert stored[0].content == first.text
 
     async def test_closing_the_response_body_persists_the_reply_at_once(
         self, session_factory, settings
@@ -420,7 +440,7 @@ class TestClientDisconnect:
         turn = await streamer.prepare(conversation_id, owner_id, "Cut me off")
 
         reply: list[str] = []
-        body = _reply_events(streamer, conversation_id, turn, reply)
+        body = _reply_events(streamer, conversation_id, owner_id, turn, reply, request_id=None)
         await anext(body)  # the echoed user turn
         await anext(body)  # the first delta
         await body.aclose()

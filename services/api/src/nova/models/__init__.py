@@ -5,19 +5,16 @@ Alembic autogeneration and ``create_all`` see every table.
 """
 
 from nova.models.conversation import Conversation, Message
-from nova.models.device import Device, DeviceClaim, DeviceCredential, DeviceTelemetry
 from nova.models.memory import Memory
 from nova.models.refresh_token import RefreshToken
+from nova.models.tool_invocation import ToolInvocation
 from nova.models.user import User
 
 __all__ = [
     "Conversation",
-    "Device",
-    "DeviceClaim",
-    "DeviceCredential",
-    "DeviceTelemetry",
     "Memory",
     "Message",
     "RefreshToken",
+    "ToolInvocation",
     "User",
 ]
