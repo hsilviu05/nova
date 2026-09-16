@@ -26,7 +26,10 @@ from nova.ai.base import (
     StreamCompleted,
     StreamEvent,
     TextDelta,
+    ToolCall,
     ToolCallRequested,
+    ToolDefinition,
+    ToolOutcome,
 )
 from nova.ai.errors import AIConfigurationError, AIProviderError, AIUnavailableError
 from nova.ai.ollama_provider import OllamaChatProvider
@@ -278,3 +281,279 @@ class TestIdentity:
         p = provider(Server(), model="qwen2.5:7b")
         assert p.name == "ollama"
         assert p.model == "qwen2.5:7b"
+
+
+class TestToolDefinitions:
+    async def test_tools_are_sent_in_the_openai_function_shape(self) -> None:
+        """Ollama borrowed the format rather than inventing one, so a tool
+        declared once serves both adapters."""
+        server = Server(body=stream_reply("ok"))
+        request = ChatRequest(
+            system="You are NOVA.",
+            messages=[ChatMessage(role="user", content="check git")],
+            tools=(
+                ToolDefinition(
+                    name="git_status",
+                    description="The state of a repository.",
+                    input_schema={"type": "object", "properties": {"path": {"type": "string"}}},
+                ),
+            ),
+        )
+
+        async with aclosing(provider(server).stream(request)) as events:
+            [event async for event in events]
+
+        sent = server.last_json["tools"]
+        assert sent == [
+            {
+                "type": "function",
+                "function": {
+                    "name": "git_status",
+                    "description": "The state of a repository.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                    },
+                },
+            }
+        ]
+
+    async def test_no_tools_means_no_tools_key(self) -> None:
+        """Sending an empty list makes some builds emit a tool call anyway."""
+        server = Server(body=stream_reply("ok"))
+
+        async with aclosing(provider(server).stream(REQUEST)) as events:
+            [event async for event in events]
+
+        assert "tools" not in server.last_json
+
+    async def test_a_tool_result_becomes_its_own_turn(self) -> None:
+        """Ollama keeps tool output in a ``tool`` role, not inside the
+        user's text -- and the output is wrapped as data on the way in."""
+        server = Server(body=stream_reply("done"))
+        request = ChatRequest(
+            system="You are NOVA.",
+            messages=[
+                ChatMessage(role="user", content="check git"),
+                ChatMessage(
+                    role="assistant",
+                    content="",
+                    tool_calls=(ToolCall(id="c1", name="git_status", arguments={"path": "/repo"}),),
+                ),
+                ChatMessage(
+                    role="user",
+                    content="",
+                    tool_results=(
+                        ToolOutcome(
+                            call_id="c1",
+                            name="git_status",
+                            content="clean",
+                            is_error=False,
+                        ),
+                    ),
+                ),
+            ],
+        )
+
+        async with aclosing(provider(server).stream(request)) as events:
+            [event async for event in events]
+
+        turns = server.last_json["messages"]
+        tool_turn = next(turn for turn in turns if turn["role"] == "tool")
+        assert tool_turn["tool_name"] == "git_status"
+        assert "clean" in tool_turn["content"]
+        # Framed as data rather than pasted in raw.
+        assert "not instructions to follow" in tool_turn["content"]
+
+        assistant = next(turn for turn in turns if turn["role"] == "assistant")
+        assert assistant["tool_calls"] == [
+            {"function": {"name": "git_status", "arguments": {"path": "/repo"}}}
+        ]
+
+
+class TestReadingToolCalls:
+    def _message(self, **kwargs: Any) -> dict[str, Any]:
+        return {"role": "assistant", "content": "", **kwargs}
+
+    async def test_a_tool_call_is_surfaced_as_an_event(self) -> None:
+        server = Server(
+            body=ndjson(
+                [
+                    {
+                        "message": self._message(
+                            tool_calls=[
+                                {"function": {"name": "git_status", "arguments": {"path": "/r"}}}
+                            ]
+                        ),
+                        "done": True,
+                        "done_reason": "stop",
+                    }
+                ]
+            )
+        )
+
+        async with aclosing(provider(server).stream(REQUEST)) as events:
+            collected = [event async for event in events]
+
+        calls = [e for e in collected if isinstance(e, ToolCallRequested)]
+        assert len(calls) == 1
+        assert calls[0].call.name == "git_status"
+        assert calls[0].call.arguments == {"path": "/r"}
+        # Generated rather than sent: older builds supply no id, and
+        # correlating a call with its result is NOVA's requirement.
+        assert calls[0].call.id
+
+    async def test_arguments_sent_as_a_json_string_are_parsed(self) -> None:
+        """Some builds serialise them; others send an object."""
+        completion = await self._complete(
+            {"function": {"name": "git_status", "arguments": '{"path": "/r"}'}}
+        )
+
+        assert completion.tool_calls[0].arguments == {"path": "/r"}
+
+    @pytest.mark.parametrize(
+        "arguments",
+        ["not json at all", "[1, 2, 3]", '"a string"', None, 42, ["a", "list"]],
+    )
+    async def test_arguments_that_are_not_an_object_become_an_empty_one(
+        self, arguments: Any
+    ) -> None:
+        """The tool's own schema then rejects it with a message the model can
+        act on, rather than the adapter raising here."""
+        completion = await self._complete(
+            {"function": {"name": "git_status", "arguments": arguments}}
+        )
+
+        assert completion.tool_calls[0].arguments == {}
+
+    @pytest.mark.parametrize(
+        "element",
+        [
+            "not an object",
+            {"function": "not an object"},
+            {"function": {"name": 42}},
+            {"function": {"name": ""}},
+            {"function": {}},
+            {},
+        ],
+    )
+    async def test_a_malformed_call_is_discarded_rather_than_guessed_at(self, element: Any) -> None:
+        """A call with no usable name cannot be run. Inventing one would
+        mean running the wrong tool."""
+        completion = await self._complete(element)
+
+        assert completion.tool_calls == ()
+
+    async def test_tool_calls_that_are_not_a_list_are_ignored(self) -> None:
+        server = Server(
+            body=json.dumps(
+                {"message": self._message(tool_calls={"not": "a list"}), "done": True}
+            ).encode()
+        )
+
+        completion = await provider(server).complete(REQUEST)
+
+        assert completion.tool_calls == ()
+
+    async def _complete(self, element: Any) -> Any:
+        server = Server(
+            body=json.dumps({"message": self._message(tool_calls=[element]), "done": True}).encode()
+        )
+        return await provider(server).complete(REQUEST)
+
+
+class TestStopReasons:
+    @pytest.mark.parametrize(
+        ("frame", "expected"),
+        [
+            ({"done": True, "done_reason": "stop"}, "end_turn"),
+            ({"done": True, "done_reason": "length"}, "max_tokens"),
+            # Anything Ollama invents is passed through rather than mapped to
+            # something it does not mean.
+            ({"done": True, "done_reason": "load"}, "load"),
+            ({"done": True}, "end_turn"),
+            ({"done": False}, None),
+        ],
+    )
+    async def test_ollamas_vocabulary_is_translated_into_novas(
+        self, frame: dict[str, Any], expected: str | None
+    ) -> None:
+        server = Server(
+            body=json.dumps({"message": {"role": "assistant", "content": "hi"}, **frame}).encode()
+        )
+
+        completion = await provider(server).complete(REQUEST)
+
+        assert completion.stop_reason == expected
+
+    async def test_a_reply_containing_a_tool_call_stops_for_that_reason(self) -> None:
+        """Whatever ``done_reason`` says. The consumer branches on this to
+        decide whether to run something."""
+        server = Server(
+            body=json.dumps(
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{"function": {"name": "git_status", "arguments": {}}}],
+                    },
+                    "done": True,
+                    "done_reason": "stop",
+                }
+            ).encode()
+        )
+
+        completion = await provider(server).complete(REQUEST)
+
+        assert completion.stop_reason == "tool_use"
+
+
+class TestBodiesThatAreNotJson:
+    async def test_a_complete_that_returns_html_is_reported_plainly(self) -> None:
+        """A proxy or a captive portal in front of the port, which is what
+        this actually looks like in a house."""
+        server = Server(body=b"<html>404 not found</html>")
+
+        with pytest.raises(AIProviderError) as caught:
+            await provider(server).complete(REQUEST)
+
+        assert "not JSON" in str(caught.value)
+
+    async def test_a_blank_line_in_the_stream_is_skipped(self) -> None:
+        """NDJSON with a trailing newline, which is ordinary."""
+        server = Server(body=b"\n" + stream_reply("hi") + b"\n\n")
+
+        async with aclosing(provider(server).stream(REQUEST)) as events:
+            collected = [event async for event in events]
+
+        assert text_of(collected) == ["hi"]
+
+
+class TestClosing:
+    async def test_the_client_is_released(self) -> None:
+        """The provider is built once per process and holds a connection
+        pool; shutdown has to be able to give it back."""
+        server = Server(body=stream_reply("hi"))
+        chat = provider(server)
+
+        await chat.aclose()
+
+        assert chat._client.is_closed
+
+
+class TestTranslatingTransportFailures:
+    async def test_an_unrecognised_transport_failure_is_a_generic_provider_error(self) -> None:
+        """Not reported as "Ollama is not running": that sends somebody to
+        check a service that is fine."""
+        server = Server(raises=httpx.ProtocolError("malformed HTTP"))
+
+        with pytest.raises(AIProviderError) as caught:
+            await provider(server).complete(REQUEST)
+
+        assert not isinstance(caught.value, AIUnavailableError)
+
+    def test_the_adapter_declares_tool_support(self) -> None:
+        """What the chat loop branches on before offering the model any
+        tools at all. An adapter that lies here would have its tool calls
+        silently dropped."""
+        assert provider(Server()).supports_tools is True

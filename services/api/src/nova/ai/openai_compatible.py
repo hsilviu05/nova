@@ -94,6 +94,7 @@ class OpenAICompatibleChatProvider:
         model: str,
         api_key: str | None = None,
         timeout_seconds: float = 60.0,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._model = model
         headers = {"Content-Type": "application/json"}
@@ -104,6 +105,7 @@ class OpenAICompatibleChatProvider:
             base_url=base_url.rstrip("/"),
             headers=headers,
             timeout=httpx.Timeout(timeout_seconds, read=None),
+            transport=transport,
         )
 
     @property
@@ -262,6 +264,7 @@ class OpenAICompatibleEmbeddingProvider:
         dimensions: int,
         api_key: str | None = None,
         timeout_seconds: float = 30.0,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._model = model
         self._dimensions = dimensions
@@ -270,7 +273,10 @@ class OpenAICompatibleEmbeddingProvider:
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         self._client = httpx.AsyncClient(
-            base_url=base_url.rstrip("/"), headers=headers, timeout=timeout_seconds
+            base_url=base_url.rstrip("/"),
+            headers=headers,
+            timeout=timeout_seconds,
+            transport=transport,
         )
 
     @property

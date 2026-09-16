@@ -255,11 +255,15 @@ def _parse_status(output: str) -> dict[str, Any]:
                 elif token.startswith("-"):
                     behind = int(token[1:] or 0)
         elif line.startswith(("1 ", "2 ")):
-            # "1 XY ..." ordinary change; "2 XY ..." a rename, whose path
-            # field holds "new\told" -- only the new name is interesting.
-            parts = line.split(" ", 8)
-            if len(parts) >= 9:
-                files.append({"status": parts[1], "path": parts[8].split("\t")[0]})
+            # An ordinary change has eight fields before the path. A rename
+            # has nine: git inserts the similarity score ("R100") first, and
+            # its path field holds "new\told" -- only the new name is
+            # interesting. Splitting both the same way puts the score into
+            # the filename, which is how this first shipped.
+            fields = 9 if line.startswith("2 ") else 8
+            parts = line.split(" ", fields)
+            if len(parts) > fields:
+                files.append({"status": parts[1], "path": parts[fields].split("\t")[0]})
         elif line.startswith("? "):
             files.append({"status": "??", "path": line[2:]})
         elif line.startswith("u "):

@@ -261,3 +261,117 @@ class TestBuilding:
 
         assert registry.specs()
         assert all(spec.permission is Permission.READ for spec in registry.specs())
+
+
+class TestEveryGroupCanBeSwitched:
+    """Each group's presence is a configuration decision, checked one by one.
+
+    The registry is built once at startup and frozen, so a group that is
+    registered when it should not be stays registered for the life of the
+    process -- and is offered to the model on every turn.
+    """
+
+    def test_docker_is_off_by_default_and_appears_when_enabled(self) -> None:
+        assert not build_registry(tools=ToolSettings(), integrations=IntegrationSettings()).has(
+            "docker_status"
+        )
+
+        registry = build_registry(
+            tools=ToolSettings(docker_enabled=True), integrations=IntegrationSettings()
+        )
+
+        assert registry.has("docker_status")
+        assert registry.has("docker_remove_container")
+
+    def test_git_is_on_by_default_and_can_be_switched_off(self) -> None:
+        assert build_registry(tools=ToolSettings(), integrations=IntegrationSettings()).has(
+            "git_status"
+        )
+
+        assert not build_registry(
+            tools=ToolSettings(git_enabled=False), integrations=IntegrationSettings()
+        ).has("git_status")
+
+    def test_system_can_be_switched_off(self) -> None:
+        assert not build_registry(
+            tools=ToolSettings(system_enabled=False), integrations=IntegrationSettings()
+        ).has("system_health")
+
+    def test_github_appears_when_it_is_enabled_and_has_a_token(self) -> None:
+        registry = build_registry(
+            tools=ToolSettings(github_enabled=True),
+            integrations=IntegrationSettings(github_token="ghp_fake"),  # type: ignore[arg-type]
+        )
+
+        assert registry.has("github_repositories")
+        assert registry.has("github_pull_requests")
+
+    def test_the_memory_tools_need_their_dependencies_not_just_the_flag(self) -> None:
+        """A half-wired knowledge group would register tools that raise on
+        the first call, which is worse than not offering them."""
+        assert not build_registry(
+            tools=ToolSettings(memory_tools_enabled=True),
+            integrations=IntegrationSettings(),
+            knowledge=None,
+        ).has("memory_search")
+
+    def test_shell_is_absent_until_it_is_deliberately_enabled(self) -> None:
+        """The single most consequential line in this file.
+
+        Shell execution off by default is a stated constraint of the whole
+        design, and this is the test that fails if a default ever drifts.
+        """
+        assert ToolSettings().shell_enabled is False
+        assert not build_registry(tools=ToolSettings(), integrations=IntegrationSettings()).has(
+            "shell_command"
+        )
+
+        enabled = build_registry(
+            tools=ToolSettings(shell_enabled=True, shell_allowlist=["ls"]),
+            integrations=IntegrationSettings(),
+        )
+
+        assert enabled.has("execute_shell_command")
+
+    def test_everything_at_once_registers_every_group(self) -> None:
+        registry = build_registry(
+            tools=ToolSettings(
+                system_enabled=True,
+                docker_enabled=True,
+                git_enabled=True,
+                github_enabled=True,
+                projects_enabled=True,
+                memory_tools_enabled=False,
+                shell_enabled=True,
+                shell_allowlist=["ls"],
+            ),
+            integrations=IntegrationSettings(
+                github_token="ghp_fake",  # type: ignore[arg-type]
+                projects=[ProjectTarget(name="SnapWorth", base_url="http://127.0.0.1:9000")],
+            ),
+        )
+
+        assert {group.value for group in registry.groups()} == {
+            "system",
+            "docker",
+            "git",
+            "github",
+            "projects",
+            "developer",
+        }
+
+    def test_a_disabled_group_registers_nothing_at_all(self) -> None:
+        """Not "registers tools that refuse". The model is never shown a
+        capability it cannot use."""
+        registry = build_registry(
+            tools=ToolSettings(
+                system_enabled=False,
+                git_enabled=False,
+                projects_enabled=False,
+                memory_tools_enabled=False,
+            ),
+            integrations=IntegrationSettings(),
+        )
+
+        assert len(registry) == 0
+        assert registry.specs() == []

@@ -697,3 +697,253 @@ async def _invocations(session_factory: Any) -> list[ToolInvocation]:
     async with session_factory() as session:
         result = await session.execute(select(ToolInvocation).order_by(ToolInvocation.created_at))
         return list(result.scalars().all())
+
+
+class SlowTool(Tool):
+    """Hangs somewhere the tool's own deadline does not reach."""
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="slow",
+            description="Never answers.",
+            group=ToolGroup.SYSTEM,
+            permission=Permission.READ,
+        )
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        import asyncio
+
+        await asyncio.sleep(60)
+        raise AssertionError("should have been given up on")  # pragma: no cover
+
+
+class RefusingTool(Tool):
+    """Raises a ToolError, the way a real tool reports a bad request."""
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="refusing",
+            description="Says no.",
+            group=ToolGroup.SYSTEM,
+            permission=Permission.READ,
+        )
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        from nova.tools.errors import ToolError
+
+        raise ToolError("That repository is not a repository.", code="tool_not_a_repository")
+
+
+class FailingResultTool(Tool):
+    """Returns a failure rather than raising one."""
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="failing_result",
+            description="Reports a failure in its result.",
+            group=ToolGroup.SYSTEM,
+            permission=Permission.READ,
+        )
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        return ToolResult.failure("Docker is not running.", code="docker_unavailable")
+
+
+def _service(
+    registry: ToolRegistry, settings: Settings, redis: Any, session_factory: Any
+) -> ToolService:
+    return ToolService(
+        registry=registry,
+        settings=settings.tools,
+        redis=redis,
+        session_factory=session_factory,
+    )
+
+
+class TestFailuresAreAudited:
+    """Every way a tool can fail writes a row, with a distinguishable code.
+
+    "It didn't work" is not an answer anyone can act on. A tool that hung, a
+    tool that refused the request, and a tool that reported a dead daemon are
+    three different problems, and the log has to tell them apart afterwards.
+    """
+
+    async def test_a_tool_that_hangs_is_given_up_on_and_recorded(
+        self, settings: Settings, redis_client: Any, session_factory: Any
+    ) -> None:
+        """The outer net.
+
+        Tools that shell out enforce their own, shorter deadline. This
+        catches one that hangs somewhere else -- a socket with no timeout of
+        its own -- because a hung tool holds a chat turn open indefinitely.
+        """
+        from nova.tools.errors import ToolTimeoutError
+
+        registry = ToolRegistry()
+        registry.register(SlowTool())
+        owner_id = await _a_user(session_factory)
+
+        quick = settings.model_copy(deep=True)
+        quick.tools.command_timeout_seconds = 0.05
+
+        service = _service(registry, quick, redis_client, session_factory)
+
+        with pytest.raises(ToolTimeoutError):
+            await service.invoke("slow", {}, tool_context(user_id=owner_id))
+
+        rows = await _invocations(session_factory)
+        assert [(row.tool_name, row.status, row.error_code) for row in rows] == [
+            ("slow", "timed_out", "tool_timeout")
+        ]
+
+    async def test_a_tool_that_refuses_is_recorded_with_its_own_code(
+        self, settings: Settings, redis_client: Any, session_factory: Any
+    ) -> None:
+        from nova.tools.errors import ToolError
+
+        registry = ToolRegistry()
+        registry.register(RefusingTool())
+        owner_id = await _a_user(session_factory)
+
+        service = _service(registry, settings, redis_client, session_factory)
+
+        with pytest.raises(ToolError):
+            await service.invoke("refusing", {}, tool_context(user_id=owner_id))
+
+        rows = await _invocations(session_factory)
+        assert rows[0].status == "failed"
+        # The tool's own code, not a generic one: this is what makes the log
+        # answerable afterwards.
+        assert rows[0].error_code == "tool_not_a_repository"
+
+    async def test_a_failure_returned_rather_than_raised_is_still_recorded_as_one(
+        self, settings: Settings, redis_client: Any, session_factory: Any
+    ) -> None:
+        """ "Docker is not running" comes back as a result, not an exception,
+        because it is an answer. It is still a failed invocation."""
+        registry = ToolRegistry()
+        registry.register(FailingResultTool())
+        owner_id = await _a_user(session_factory)
+
+        service = _service(registry, settings, redis_client, session_factory)
+        invocation = await service.invoke("failing_result", {}, tool_context(user_id=owner_id))
+
+        assert invocation.result.is_error is True
+
+        rows = await _invocations(session_factory)
+        assert rows[0].status == "failed"
+        assert rows[0].error_code == "docker_unavailable"
+
+    async def test_an_unexpected_exception_does_not_reach_the_caller_intact(
+        self, registry: ToolRegistry, settings: Settings, redis_client: Any, session_factory: Any
+    ) -> None:
+        """Its message can carry paths, hostnames, and occasionally a
+        credential from whatever the tool was talking to."""
+        from nova.tools.errors import ToolError
+
+        owner_id = await _a_user(session_factory)
+        service = _service(registry, settings, redis_client, session_factory)
+
+        with pytest.raises(ToolError) as caught:
+            await service.invoke("exploding", {}, tool_context(user_id=owner_id))
+
+        assert caught.value.code == "tool_unexpected_error"
+        assert "/Users/silviu/secrets" not in str(caught.value)
+
+        rows = await _invocations(session_factory)
+        assert rows[0].error_code == "tool_unexpected_error"
+
+
+class TestWhenTheAuditLogItselfFails:
+    async def test_a_failed_audit_write_does_not_fail_the_tool(
+        self, registry: ToolRegistry, settings: Settings, redis_client: Any, session_factory: Any
+    ) -> None:
+        """Deliberate, and the trade-off is worth stating.
+
+        Losing the database means losing the audit trail either way. Refusing
+        every read-only tool as well would turn a logging outage into a
+        total outage, and NOVA would stop being able to say what is wrong
+        with the machine at exactly the moment somebody asks.
+        """
+        owner_id = await _a_user(session_factory)
+
+        class BrokenFactory:
+            def __call__(self) -> Any:
+                raise RuntimeError("the pool is exhausted")
+
+        service = ToolService(
+            registry=registry,
+            settings=settings.tools,
+            redis=redis_client,
+            session_factory=BrokenFactory(),  # type: ignore[arg-type]
+        )
+
+        invocation = await service.invoke(
+            "echo", {"text": "still works"}, tool_context(user_id=owner_id)
+        )
+
+        assert invocation.result.content == "still works"
+
+
+class TestWhenRedisIsDown:
+    async def test_a_confirmation_cannot_be_consumed_and_the_tool_does_not_run(
+        self,
+        registry: ToolRegistry,
+        settings: Settings,
+        session_factory: Any,
+        demolish: DemolishTool,
+    ) -> None:
+        """This fails closed, unlike the rate limiter.
+
+        Losing Redis costs abuse protection there. Here it would mean running
+        a destructive command nobody approved, so the answer is to refuse.
+        """
+        from redis.exceptions import ConnectionError as RedisConnectionError
+
+        owner_id = await _a_user(session_factory)
+
+        class DeadRedis:
+            async def getdel(self, key: str) -> Any:
+                raise RedisConnectionError("connection refused")
+
+        service = ToolService(
+            registry=registry,
+            settings=settings.tools,
+            redis=DeadRedis(),  # type: ignore[arg-type]
+            session_factory=session_factory,
+        )
+
+        with pytest.raises(ToolPermissionError) as caught:
+            await service.invoke(
+                "demolish",
+                {"target": "nova-db"},
+                tool_context(user_id=owner_id),
+                confirmation_token="whatever",
+            )
+
+        assert caught.value.code == "tool_confirmation_unavailable"
+        assert demolish.destroyed == []
+
+
+class TestRedactionThroughStructures:
+    def test_a_credential_inside_a_list_is_redacted(self) -> None:
+        """Arguments and tool ``data`` are JSON-ish, and the app renders
+        ``data`` directly -- so a secret nested in a list is as much of a
+        leak as one in the text."""
+        from nova.services.tools import _redact_structure
+
+        redacted = _redact_structure(
+            {
+                "args": ["--token", "ghp_abcdefghijklmnopqrstuvwxyz0123456789"],
+                "count": 3,
+                "nested": [{"key": "ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz01"}],
+            }
+        )
+
+        assert "ghp_abcdef" not in str(redacted)
+        assert "sk-ant-api03" not in str(redacted)
+        # Non-strings pass through untouched rather than being stringified.
+        assert redacted["count"] == 3

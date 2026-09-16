@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from datetime import timedelta
 
@@ -166,3 +167,115 @@ class TestJWTSettingsValidation:
     def test_rejects_short_secret(self) -> None:
         with pytest.raises(ValueError, match="at least 32 characters"):
             JWTSettings(secret_key="too-short")  # type: ignore[arg-type]
+
+
+ISSUER = "nova-api"
+AUDIENCE = "nova-clients"
+
+
+class TestHashesThatAreNotHashes:
+    """A stored hash can be wrong in ways a password never is.
+
+    A hand-edited row, a restored backup from a different argon2 build, a
+    column truncated by a migration. None of those should look different to
+    an attacker from a wrong password, and none should crash the login route.
+    """
+
+    @pytest.mark.parametrize(
+        "stored", ["not-a-hash", "", "$argon2id$v=19$m=65536", "plaintext-password"]
+    )
+    def test_a_malformed_stored_hash_reads_as_a_failed_login(
+        self, hasher: Argon2PasswordHasher, stored: str
+    ) -> None:
+        assert hasher.verify("correct horse battery staple", stored) is False
+
+    def test_a_hash_that_cannot_be_read_is_treated_as_needing_a_rehash(
+        self, hasher: Argon2PasswordHasher
+    ) -> None:
+        """Fails towards re-hashing.
+
+        The alternative -- reporting "this is current" for a hash that cannot
+        be parsed -- would leave a bad row in place forever.
+        """
+        assert hasher.needs_rehash("not-a-hash") is True
+
+    def test_a_current_hash_does_not_need_rehashing(self, hasher: Argon2PasswordHasher) -> None:
+        assert hasher.needs_rehash(hasher.hash("correct horse battery staple")) is False
+
+
+class TestTokensWithMissingClaims:
+    def test_a_token_whose_subject_is_not_a_uuid_is_refused(self, tokens: TokenService) -> None:
+        """The subject goes straight into a database lookup.
+
+        Anything that is not a UUID is refused here rather than allowed to
+        become a query with a string where an id belongs.
+        """
+        forged = jwt.encode(
+            {
+                "sub": "not-a-uuid",
+                "jti": "abc",
+                "typ": "access",
+                "iat": int(time.time()),
+                "exp": int(time.time()) + 600,
+                "iss": ISSUER,
+                "aud": AUDIENCE,
+            },
+            SECRET,
+            algorithm="HS256",
+        )
+
+        with pytest.raises(AuthenticationError) as caught:
+            tokens.decode_access_token(forged)
+
+        assert caught.value.code == "token_invalid"
+
+    def test_a_token_with_no_subject_at_all_is_refused(self, tokens: TokenService) -> None:
+        """``require`` in the decode options should catch this first. Tested
+        anyway, because the two checks guard different failures and one of
+        them could be relaxed without the other being noticed."""
+        forged = jwt.encode(
+            {
+                "jti": "abc",
+                "typ": "access",
+                "iat": int(time.time()),
+                "exp": int(time.time()) + 600,
+                "iss": ISSUER,
+                "aud": AUDIENCE,
+            },
+            SECRET,
+            algorithm="HS256",
+        )
+
+        with pytest.raises(AuthenticationError) as caught:
+            tokens.decode_access_token(forged)
+
+        assert caught.value.code == "token_invalid"
+
+    @pytest.mark.parametrize("kind", ["refresh", "reset", "", None])
+    def test_a_token_of_any_other_class_is_not_an_access_token(
+        self, tokens: TokenService, kind: str | None
+    ) -> None:
+        """A correctly signed token is not automatically an access token.
+
+        Without this check, any other token class NOVA ever signs with the
+        same key -- today or later -- would be accepted at the API's front
+        door. The signature is valid; the claim is what makes it an access
+        token.
+        """
+        claims = {
+            "sub": str(uuid.uuid4()),
+            "jti": "abc",
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 600,
+            "iss": ISSUER,
+            "aud": AUDIENCE,
+        }
+        if kind is not None:
+            claims["typ"] = kind
+
+        forged = jwt.encode(claims, SECRET, algorithm="HS256")
+
+        with pytest.raises(AuthenticationError) as caught:
+            tokens.decode_access_token(forged)
+
+        assert caught.value.code == "token_invalid"

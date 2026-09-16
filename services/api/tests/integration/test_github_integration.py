@@ -319,3 +319,255 @@ class TestRefusals:
             api, created["webhook_url"], created["secret"], {"action": "opened"}, event="issues"
         )
         assert response.status_code == 200
+
+
+class TestBodiesThatAreSignedAndStillWrong:
+    """Signed by GitHub and still not a payload NOVA can read.
+
+    Not a thing that happens in practice, which is precisely why it needs a
+    test: the failure mode is a 500, and GitHub retries a non-2xx delivery
+    for hours.
+    """
+
+    async def _wired(self, api: AsyncClient) -> dict[str, Any]:
+        headers = await _register(api)
+        return (await api.post("/api/v1/integrations/github", headers=headers, json={})).json()
+
+    async def _deliver_raw(self, api: AsyncClient, created: dict[str, Any], body: bytes) -> Any:
+        return await api.post(
+            created["webhook_url"],
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                EVENT_HEADER: "workflow_run",
+                DELIVERY_HEADER: str(uuid.uuid4()),
+                SIGNATURE_HEADER: sign(created["secret"], body),
+            },
+        )
+
+    async def test_a_body_that_is_not_json_is_acknowledged_and_ignored(
+        self, api: AsyncClient
+    ) -> None:
+        """Acknowledged, not refused. A 4xx here would put GitHub into a
+        retry storm over a delivery that will never parse."""
+        created = await self._wired(api)
+
+        response = await self._deliver_raw(api, created, b"not json at all")
+
+        assert response.status_code == 200
+        assert response.json()["reason"] == "body is not JSON"
+
+    @pytest.mark.parametrize("body", [b"[]", b'"a string"', b"42", b"null"])
+    async def test_valid_json_that_is_not_an_object_is_ignored(
+        self, api: AsyncClient, body: bytes
+    ) -> None:
+        created = await self._wired(api)
+
+        response = await self._deliver_raw(api, created, body)
+
+        assert response.status_code == 200
+        assert response.json()["reason"] == "body is not an object"
+
+    async def test_an_oversized_declared_length_is_refused_before_the_body_is_read(
+        self, api: AsyncClient
+    ) -> None:
+        """The cheap refusal.
+
+        A Content-Length over the cap costs nothing to reject; reading the
+        body first would mean a client could make NOVA buffer whatever it
+        liked by lying about nothing at all.
+        """
+        created = await self._wired(api)
+        huge = b"{" + b" " * (MAX_BODY_BYTES + 10) + b"}"
+
+        response = await api.post(
+            created["webhook_url"],
+            content=huge,
+            headers={
+                EVENT_HEADER: "ping",
+                DELIVERY_HEADER: str(uuid.uuid4()),
+                SIGNATURE_HEADER: sign(created["secret"], huge),
+                "Content-Length": str(len(huge)),
+            },
+        )
+
+        assert response.status_code == 413
+
+    async def test_a_body_larger_than_it_declared_is_still_refused(self, api: AsyncClient) -> None:
+        """A chunked delivery declares no length at all.
+
+        The declared-length check is an optimisation; this is the bound that
+        actually holds, and it is the one a client cannot talk its way past.
+        """
+        created = await self._wired(api)
+        huge = b"{" + b" " * (MAX_BODY_BYTES + 10) + b"}"
+
+        async def chunks() -> Any:
+            yield huge
+
+        response = await api.post(
+            created["webhook_url"],
+            content=chunks(),
+            headers={
+                EVENT_HEADER: "ping",
+                DELIVERY_HEADER: str(uuid.uuid4()),
+                SIGNATURE_HEADER: sign(created["secret"], huge),
+            },
+        )
+
+        assert response.status_code == 413
+
+
+class TestManagingAnIntegrationThatIsNotThere:
+    """Every route has to answer 404 rather than raise.
+
+    They share one repository lookup that returns None, and each caller has
+    to turn that into the same answer -- which is the kind of thing that
+    stays right only if each one is asserted.
+    """
+
+    async def test_reading_one(self, api: AsyncClient) -> None:
+        headers = await _register(api)
+
+        assert (await api.get("/api/v1/integrations/github", headers=headers)).status_code == 404
+
+    async def test_updating_one(self, api: AsyncClient) -> None:
+        headers = await _register(api)
+        response = await api.patch(
+            "/api/v1/integrations/github", headers=headers, json={"enabled": False}
+        )
+
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "github_integration_not_found"
+
+    async def test_deleting_one(self, api: AsyncClient) -> None:
+        headers = await _register(api)
+
+        assert (await api.delete("/api/v1/integrations/github", headers=headers)).status_code == 404
+
+
+class TestRotationKeepsWhatWasConfigured:
+    async def test_rotating_with_a_new_repository_changes_it(self, api: AsyncClient) -> None:
+        headers = await _register(api)
+        first = (
+            await api.post(
+                "/api/v1/integrations/github",
+                headers=headers,
+                json={"repository": "hsilviu05/nova"},
+            )
+        ).json()
+
+        second = (
+            await api.post(
+                "/api/v1/integrations/github",
+                headers=headers,
+                json={"repository": "hsilviu05/snapworth"},
+            )
+        ).json()
+
+        assert second["id"] == first["id"]
+        assert second["repository"] == "hsilviu05/snapworth"
+
+    async def test_rotating_without_naming_one_keeps_the_existing_repository(
+        self, api: AsyncClient
+    ) -> None:
+        """Rotating a secret is not a reason to widen what is watched.
+
+        Clearing it would silently start accepting deliveries from every
+        repository the hook is installed on.
+        """
+        headers = await _register(api)
+        await api.post(
+            "/api/v1/integrations/github",
+            headers=headers,
+            json={"repository": "hsilviu05/nova"},
+        )
+
+        rotated = (await api.post("/api/v1/integrations/github", headers=headers, json={})).json()
+
+        assert rotated["repository"] == "hsilviu05/nova"
+
+    async def test_updating_only_the_repository_leaves_enabled_alone(
+        self, api: AsyncClient
+    ) -> None:
+        """A PATCH is a partial update.
+
+        Omitting ``enabled`` must not read as "set it to null", or changing
+        the watched repository would quietly switch the integration off.
+        """
+        headers = await _register(api)
+        await api.post("/api/v1/integrations/github", headers=headers, json={})
+        await api.patch("/api/v1/integrations/github", headers=headers, json={"enabled": False})
+
+        updated = (
+            await api.patch(
+                "/api/v1/integrations/github",
+                headers=headers,
+                json={"repository": "hsilviu05/nova"},
+            )
+        ).json()
+
+        assert updated["repository"] == "hsilviu05/nova"
+        assert updated["enabled"] is False
+
+    async def test_rotating_re_enables_a_disabled_integration(self, api: AsyncClient) -> None:
+        """Asking for a new secret is asking for it to work again."""
+        headers = await _register(api)
+        await api.post("/api/v1/integrations/github", headers=headers, json={})
+        await api.patch("/api/v1/integrations/github", headers=headers, json={"enabled": False})
+
+        rotated = (await api.post("/api/v1/integrations/github", headers=headers, json={})).json()
+
+        assert rotated["enabled"] is True
+
+
+class TestDeduplicationWhenRedisIsDown:
+    async def test_a_delivery_is_still_processed(
+        self,
+        settings,
+        engine,
+        session_factory,
+        redis_client,  # type: ignore[no-untyped-def]
+    ) -> None:
+        """This fails open, unlike the confirmation store.
+
+        Losing dedupe means a replayed delivery rewrites ``last_event`` with
+        the same sentence it already held. Refusing every delivery until
+        Redis comes back would be a much worse answer than that.
+        """
+        from redis.exceptions import ConnectionError as RedisConnectionError
+
+        class HalfDeadRedis:
+            """Works for sessions and rate limiting, fails on the dedupe key."""
+
+            def __init__(self, real: Any) -> None:
+                self._real = real
+
+            def __getattr__(self, name: str) -> Any:
+                return getattr(self._real, name)
+
+            async def set(self, key: str, *args: Any, **kwargs: Any) -> Any:
+                if key.startswith("github:delivery:"):
+                    raise RedisConnectionError("connection refused")
+                return await self._real.set(key, *args, **kwargs)
+
+        app = build_test_app(
+            settings,
+            engine=engine,
+            session_factory=session_factory,
+            redis=HalfDeadRedis(redis_client),  # type: ignore[arg-type]
+        )
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://nova.test"
+        ) as api:
+            headers = await _register(api)
+            created = (
+                await api.post("/api/v1/integrations/github", headers=headers, json={})
+            ).json()
+
+            response = await deliver(
+                api, created["webhook_url"], created["secret"], green(), delivery="d-1"
+            )
+
+            assert response.status_code == 200
+            assert response.json()["status"] == "recorded"

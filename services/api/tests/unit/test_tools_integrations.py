@@ -459,3 +459,252 @@ class TestShellTool:
             )
 
         assert caught.value.code == "tool_path_outside_workspace"
+
+
+class TestGitHubEmptyResults:
+    """Nothing found is an answer, and a different one from a failure.
+
+    A model that gets an empty string back tends to retry, then guess. Each
+    of these says plainly that the list was empty, and names the repository
+    so the answer is checkable.
+    """
+
+    async def test_no_repositories_visible_says_so(self) -> None:
+        tool = _github(lambda request: httpx.Response(200, json=[]))["github_repositories"]
+
+        result = await tool.execute(tool.spec.input_model(), _context())
+
+        assert result.content == "No repositories visible."
+        assert result.data == {"repositories": []}
+
+    async def test_no_commits_names_the_repository(self) -> None:
+        tool = _github(lambda request: httpx.Response(200, json=[]))["github_recent_commits"]
+
+        result = await tool.execute(tool.spec.input_model(repository="a/b"), _context())
+
+        assert result.content == "No commits found on a/b."
+
+    async def test_no_open_pull_requests_names_the_repository(self) -> None:
+        tool = _github(lambda request: httpx.Response(200, json=[]))["github_pull_requests"]
+
+        result = await tool.execute(tool.spec.input_model(repository="a/b"), _context())
+
+        assert result.content == "No open pull requests on a/b."
+
+    async def test_no_open_issues_names_the_repository(self) -> None:
+        tool = _github(lambda request: httpx.Response(200, json=[]))["github_issues"]
+
+        result = await tool.execute(tool.spec.input_model(repository="a/b"), _context())
+
+        assert result.content == "No open issues on a/b."
+
+    async def test_a_body_that_is_not_an_array_is_discarded_rather_than_indexed(self) -> None:
+        """GitHub returns an object for an error it did not give a status to.
+
+        Iterating one would yield its keys as if they were repositories.
+        """
+        tool = _github(lambda request: httpx.Response(200, json={"message": "moved"}))[
+            "github_repositories"
+        ]
+
+        result = await tool.execute(tool.spec.input_model(), _context())
+
+        assert result.data == {"repositories": []}
+
+    async def test_a_non_object_row_is_skipped(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=["a string", {"full_name": "a/b"}])
+
+        tool = _github(handler)["github_repositories"]
+
+        result = await tool.execute(tool.spec.input_model(), _context())
+
+        assert [r["full_name"] for r in result.data["repositories"]] == ["a/b"]
+
+
+class TestGitHubPullRequests:
+    async def test_open_pull_requests_are_listed_with_their_author(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.url.params["state"] == "open"
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "number": 3,
+                        "title": "Refactor to a terminal",
+                        "user": {"login": "hsilviu05"},
+                        "draft": False,
+                        "updated_at": "2026-09-16T10:00:00Z",
+                    },
+                    {
+                        "number": 4,
+                        "title": "Work in progress",
+                        "user": {"login": "hsilviu05"},
+                        "draft": True,
+                        "updated_at": "2026-09-17T10:00:00Z",
+                    },
+                ],
+            )
+
+        tool = _github(handler)["github_pull_requests"]
+
+        result = await tool.execute(tool.spec.input_model(repository="a/b"), _context())
+
+        assert "#3  Refactor to a terminal  by hsilviu05" in result.content
+        # Marked, because a draft is not waiting on anybody.
+        assert "#4  Work in progress  by hsilviu05  [draft]" in result.content
+        assert len(result.data["pull_requests"]) == 2
+
+    async def test_a_pull_request_with_no_author_object_does_not_raise(self) -> None:
+        """A user deleted since the pull request was opened."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=[{"number": 9, "title": "Old", "user": None}])
+
+        tool = _github(handler)["github_pull_requests"]
+
+        result = await tool.execute(tool.spec.input_model(repository="a/b"), _context())
+
+        assert result.data["pull_requests"][0]["author"] is None
+
+
+class TestGitHubCommitAuthors:
+    async def test_the_github_account_is_preferred(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "sha": "0123456789abcdef",
+                        "author": {"login": "hsilviu05"},
+                        "commit": {
+                            "author": {"name": "Silviu", "date": "2026-09-16T10:00:00Z"},
+                            "message": "feat: a thing\n\nwith a body",
+                        },
+                    }
+                ],
+            )
+
+        tool = _github(handler)["github_recent_commits"]
+
+        result = await tool.execute(tool.spec.input_model(repository="a/b"), _context())
+        commit = result.data["commits"][0]
+
+        assert commit["author"] == "hsilviu05"
+        # Abbreviated, and only the subject line: a commit body in a chat
+        # bubble on a phone is most of a screen.
+        assert commit["sha"] == "0123456"
+        assert commit["subject"] == "feat: a thing"
+
+    @pytest.mark.parametrize(
+        "author",
+        [None, {}, {"login": ""}, "not-an-object"],
+    )
+    async def test_a_commit_with_no_linked_account_falls_back_to_the_commit(
+        self, author: Any
+    ) -> None:
+        """Commits made through the web UI, and commits by bots, have none."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "sha": "abc",
+                        "author": author,
+                        "commit": {"author": {"name": "dependabot[bot]"}, "message": "bump"},
+                    }
+                ],
+            )
+
+        tool = _github(handler)["github_recent_commits"]
+
+        result = await tool.execute(tool.spec.input_model(repository="a/b"), _context())
+
+        assert result.data["commits"][0]["author"] == "dependabot[bot]"
+
+    async def test_a_commit_with_no_author_anywhere_is_not_an_error(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=[{"sha": "abc", "commit": {}}])
+
+        tool = _github(handler)["github_recent_commits"]
+
+        result = await tool.execute(tool.spec.input_model(repository="a/b"), _context())
+
+        assert result.data["commits"][0]["author"] is None
+
+
+class TestGitHubClientHygiene:
+    async def test_an_injected_client_is_authenticated_the_same_way(self) -> None:
+        """Otherwise the tests would exercise a path production never takes.
+
+        The headers are applied to whichever client is in use rather than
+        only to the one built here, which is the one way a test double
+        becomes a lie.
+        """
+        seen: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.update(request.headers)
+            return httpx.Response(200, json=[])
+
+        tool = _github(handler)["github_repositories"]
+        await tool.execute(tool.spec.input_model(), _context())
+
+        assert seen["authorization"] == "Bearer ghp_fake"
+        assert seen["x-github-api-version"] == "2022-11-28"
+
+    async def test_an_unexpected_status_does_not_forward_githubs_body(self) -> None:
+        """GitHub echoes request context in error bodies.
+
+        A 500 body can contain the request path and headers, and none of that
+        should reach a model.
+        """
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(500, json={"message": "token ghp_realsecret is invalid"})
+
+        tool = _github(handler)["github_repositories"]
+
+        with pytest.raises(ToolError) as caught:
+            await tool.execute(tool.spec.input_model(), _context())
+
+        assert caught.value.code == "github_error"
+        assert "500" in str(caught.value)
+        assert "ghp_realsecret" not in str(caught.value)
+
+    async def test_a_404_does_not_distinguish_missing_from_invisible(self) -> None:
+        """Saying "it exists but you cannot see it" would confirm a private
+        repository's existence to anyone who could ask NOVA a question."""
+        tool = _github(lambda request: httpx.Response(404))["github_recent_commits"]
+
+        with pytest.raises(ToolError) as caught:
+            await tool.execute(tool.spec.input_model(repository="secret/repo"), _context())
+
+        assert caught.value.code == "github_not_found"
+        assert "or the token cannot see it" in str(caught.value)
+
+    async def test_the_client_is_closed(self) -> None:
+        """The tools hold an HTTP client for the process's lifetime; the
+        registry's teardown has to be able to release it."""
+        from nova.tools.github import _GitHubClient
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+        github = _GitHubClient(IntegrationSettings(), client=client)
+
+        await github.aclose()
+
+        assert client.is_closed
+
+    def test_without_a_token_the_header_is_present_but_empty(self) -> None:
+        """Rather than absent.
+
+        An unauthenticated GitHub call still works for public data, and the
+        tools are registered only when a token is configured -- this is about
+        not constructing a half-built client that raises on attribute access.
+        """
+        from nova.tools.github import _GitHubClient
+
+        github = _GitHubClient(IntegrationSettings())
+
+        assert github.owner is None

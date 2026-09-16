@@ -36,6 +36,13 @@ from nova.tools.process import resolve_workspace_path, run
 # question behind "what's running" is always about the heavy ones.
 _PROCESS_LIMIT = 15
 
+# Named rather than inlined so the readers below can be pointed at a fixture.
+# These files exist only on Linux, and the parsing is the part worth testing;
+# without a seam it could only ever be exercised in CI and never on the Mac
+# the code is written on.
+_PROC_UPTIME = "/proc/uptime"
+_PROC_MEMINFO = "/proc/meminfo"
+
 
 class _SystemTool(Tool):
     """Shared configuration for the tools that read this machine."""
@@ -118,7 +125,7 @@ class SystemResourcesTool(_SystemTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         load = load_average()
         cpus = os.cpu_count() or 1
-        memory = memory_usage()
+        memory = await memory_usage()
 
         lines = [
             f"CPU: {cpus} cores, load {load[0]:.2f} / {load[1]:.2f} / {load[2]:.2f}"
@@ -270,23 +277,29 @@ def _uptime_seconds() -> int | None:
     the caller can live without.
     """
     try:
-        with open("/proc/uptime") as handle:
+        with open(_PROC_UPTIME) as handle:
             return int(float(handle.read().split()[0]))
     except (OSError, ValueError, IndexError):
         return None
 
 
-def memory_usage() -> dict[str, Any] | None:
-    """Memory usage, or ``None`` where it cannot be read without a subprocess."""
+async def memory_usage() -> dict[str, Any] | None:
+    """Memory usage, or ``None`` where the platform will not say.
+
+    Async because macOS will not report it without asking ``vm_stat``. Both
+    callers are already async, and the alternative -- returning nothing on
+    macOS -- is what this did until it was noticed that the memory reading
+    was blank on exactly the machine NOVA is meant to run on.
+    """
     if reading := _linuxmemory_usage():
         return reading
-    return _macosmemory_usage()
+    return await _macosmemory_usage()
 
 
 def _linuxmemory_usage() -> dict[str, Any] | None:
     try:
         values: dict[str, int] = {}
-        with open("/proc/meminfo") as handle:
+        with open(_PROC_MEMINFO) as handle:
             for line in handle:
                 key, _, rest = line.partition(":")
                 parts = rest.split()
@@ -300,35 +313,65 @@ def _linuxmemory_usage() -> dict[str, Any] | None:
     if not total or available is None:
         return None
 
-    used = total - available
-    return {
-        "total_bytes": total,
-        "used_bytes": used,
-        "available_bytes": available,
-        "percent_used": round(used / total * 100, 1),
-    }
+    return _reading(total=total, available=available)
 
 
-def _macosmemory_usage() -> dict[str, Any] | None:
-    """Physical memory and what is free, read through ``sysconf``.
+# The page classes ``vm_stat`` reports that are available to a process that
+# asks for memory: free pages, the inactive and speculative caches, and
+# pages that can be reclaimed on demand. Anything else -- active, wired,
+# compressed -- is in use.
+_RECLAIMABLE = ("Pages free", "Pages inactive", "Pages speculative", "Pages purgeable")
 
-    ``SC_AVPHYS_PAGES`` under-reports what is actually reclaimable on macOS,
-    because the file cache counts as used. It is still the right number for
-    "is this machine under memory pressure", which is the question being
-    asked, and it needs no subprocess.
+
+async def _macosmemory_usage() -> dict[str, Any] | None:
+    """Physical memory and what is reclaimable, via ``vm_stat``.
+
+    ``sysconf`` gives the total but not the free count: macOS does not
+    implement ``SC_AVPHYS_PAGES``, and asking for it raises. ``vm_stat`` is
+    the documented way to get the rest, and it goes through the same bounded
+    runner as every other command -- argv, no shell, no inherited
+    environment.
     """
     try:
         page_size = os.sysconf("SC_PAGE_SIZE")
         total_pages = os.sysconf("SC_PHYS_PAGES")
-        free_pages = os.sysconf("SC_AVPHYS_PAGES")
     except (OSError, ValueError, AttributeError):  # pragma: no cover - platform dependent
         return None
 
     if total_pages <= 0 or page_size <= 0:  # pragma: no cover - platform dependent
         return None
 
+    result = await run(["vm_stat"], timeout_seconds=5, max_output_bytes=8192)
+    if not result.ok:
+        return None
+
+    pages = _parse_vm_stat(result.stdout)
+    if not pages:
+        return None
+
     total = total_pages * page_size
-    available = max(free_pages, 0) * page_size
+    available = min(sum(pages.get(name, 0) for name in _RECLAIMABLE) * page_size, total)
+    return _reading(total=total, available=available)
+
+
+def _parse_vm_stat(output: str) -> dict[str, int]:
+    """The ``Pages <class>:  <count>.`` lines, as counts.
+
+    Lines that are not in that shape -- the header, and the byte-valued
+    totals at the end -- are skipped rather than guessed at.
+    """
+    pages: dict[str, int] = {}
+    for line in output.splitlines():
+        key, separator, rest = line.partition(":")
+        if not separator or not key.startswith("Pages "):
+            continue
+        value = rest.strip().rstrip(".")
+        if value.isdigit():
+            pages[key.strip()] = int(value)
+    return pages
+
+
+def _reading(*, total: int, available: int) -> dict[str, Any]:
     used = total - available
     return {
         "total_bytes": total,

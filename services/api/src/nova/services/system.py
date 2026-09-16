@@ -86,7 +86,7 @@ class SystemStatusService:
         ai, readiness, host, projects = await asyncio.gather(
             self._ai_status(),
             self._health.check_readiness(),
-            asyncio.to_thread(self._host_status),
+            self._host_status(),
             self._project_status(owner_id),
         )
 
@@ -164,7 +164,7 @@ class SystemStatusService:
         elapsed = (asyncio.get_running_loop().time() - started) * 1000
         return base.model_copy(update={"latency_ms": round(elapsed, 1)})
 
-    def _host_status(self) -> HostStatus:
+    async def _host_status(self) -> HostStatus:
         """This machine, read through the system tools' own helpers.
 
         Reusing them rather than reading ``/proc`` a second time means the
@@ -173,8 +173,8 @@ class SystemStatusService:
         """
         cpus = os.cpu_count() or 1
         load = load_average()
-        memory = memory_usage()
-        disk = shutil.disk_usage(os.path.expanduser("~"))
+        memory = await memory_usage()
+        disk = await asyncio.to_thread(shutil.disk_usage, os.path.expanduser("~"))
 
         return HostStatus(
             hostname=platform.node(),

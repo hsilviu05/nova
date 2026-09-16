@@ -13,10 +13,21 @@ import httpx2
 import pytest
 
 from nova.ai.anthropic_provider import FALLBACK_BETA, AnthropicChatProvider
-from nova.ai.base import ChatMessage, ChatProvider, ChatRequest
+from nova.ai.base import (
+    ChatMessage,
+    ChatProvider,
+    ChatRequest,
+    StreamCompleted,
+    TextDelta,
+    ToolCall,
+    ToolCallRequested,
+    ToolDefinition,
+    ToolOutcome,
+)
 from nova.ai.errors import (
     AIConfigurationError,
     AIProviderError,
+    AIRefusalError,
     AIUnavailableError,
 )
 
@@ -184,3 +195,316 @@ def params_system(provider: AnthropicChatProvider) -> list[dict[str, object]]:
     system = provider._build_params(_request())["system"]
     assert isinstance(system, list)
     return system
+
+
+# ---------------------------------------------------------------------------
+# Streaming and completion
+#
+# Faked at the *SDK* boundary rather than at HTTP. The code below translates
+# SDK objects into NOVA's own events, and that translation is the thing worth
+# testing; faking the wire would assert that our fake matches our
+# expectations, which is what the note at the top of this file rules out.
+# ---------------------------------------------------------------------------
+
+
+class FakeUsage:
+    def __init__(self, cache_read: int | None = 3) -> None:
+        self.input_tokens = 41
+        self.output_tokens = 7
+        if cache_read is not None:
+            self.cache_read_input_tokens = cache_read
+
+
+class TextBlock:
+    type = "text"
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class ToolUseBlock:
+    type = "tool_use"
+
+    def __init__(self, id: str, name: str, input: object) -> None:
+        self.id = id
+        self.name = name
+        self.input = input
+
+
+class FakeMessage:
+    def __init__(
+        self,
+        *,
+        content: list[object] | None = None,
+        stop_reason: str = "end_turn",
+        cache_read: int | None = 3,
+    ) -> None:
+        self.content = content if content is not None else [TextBlock("A reply.")]
+        self.stop_reason = stop_reason
+        self.model = "claude-opus-5"
+        self.usage = FakeUsage(cache_read)
+
+
+class FakeStream:
+    """Stands in for the SDK's streaming context manager."""
+
+    def __init__(self, parts: list[str], final: FakeMessage, raises: Exception | None = None):
+        self._parts = parts
+        self._final = final
+        self._raises = raises
+
+    async def __aenter__(self) -> FakeStream:
+        if self._raises is not None:
+            raise self._raises
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def text_stream(self):  # type: ignore[no-untyped-def]
+        async def generate():  # type: ignore[no-untyped-def]
+            for part in self._parts:
+                yield part
+
+        return generate()
+
+    async def get_final_message(self) -> FakeMessage:
+        return self._final
+
+
+def _with_stream(
+    provider: AnthropicChatProvider,
+    parts: list[str],
+    final: FakeMessage,
+    raises: Exception | None = None,
+) -> list[dict[str, object]]:
+    """Point the provider at a fake stream, recording the params it sends."""
+    seen: list[dict[str, object]] = []
+
+    def method(**params: object) -> FakeStream:
+        seen.append(params)
+        return FakeStream(parts, final, raises)
+
+    provider._stream_method = lambda: method  # type: ignore[method-assign]
+    return seen
+
+
+class TestStreaming:
+    async def test_text_arrives_then_a_completion_event(
+        self, provider: AnthropicChatProvider
+    ) -> None:
+        _with_stream(provider, ["Hel", "lo"], FakeMessage())
+
+        events = [e async for e in provider.stream(_request())]
+
+        assert [e.text for e in events if isinstance(e, TextDelta)] == ["Hel", "lo"]
+        completed = events[-1]
+        assert isinstance(completed, StreamCompleted)
+        assert completed.stop_reason == "end_turn"
+        assert completed.usage.input_tokens == 41
+        assert completed.usage.cache_read_tokens == 3
+
+    async def test_a_refusal_is_raised_rather_than_returned(
+        self, provider: AnthropicChatProvider
+    ) -> None:
+        """A refusal arrives as a normal 200 with a stop_reason, so it is
+        only visible once the stream has drained."""
+        _with_stream(provider, ["I'd rather"], FakeMessage(stop_reason="refusal"))
+
+        with pytest.raises(AIRefusalError):
+            _ = [e async for e in provider.stream(_request())]
+
+    async def test_tool_calls_follow_the_text(self, provider: AnthropicChatProvider) -> None:
+        final = FakeMessage(
+            content=[TextBlock("Checking."), ToolUseBlock("c1", "system_health", {"deep": True})],
+            stop_reason="tool_use",
+        )
+        _with_stream(provider, ["Checking."], final)
+
+        events = [e async for e in provider.stream(_request())]
+        calls = [e.call for e in events if isinstance(e, ToolCallRequested)]
+
+        assert calls[0].id == "c1"
+        assert calls[0].name == "system_health"
+        assert calls[0].arguments == {"deep": True}
+
+    async def test_tool_input_that_is_not_a_mapping_becomes_empty(
+        self, provider: AnthropicChatProvider
+    ) -> None:
+        """The SDK types it as ``object`` because a tool's schema is the
+        tool's own business. Anything that is not a mapping is not a usable
+        call, so it is dropped rather than passed along half-formed."""
+        final = FakeMessage(content=[ToolUseBlock("c1", "wipe", "not a mapping")])
+        _with_stream(provider, [], final)
+
+        events = [e async for e in provider.stream(_request())]
+        calls = [e.call for e in events if isinstance(e, ToolCallRequested)]
+
+        assert calls[0].arguments == {}
+
+    async def test_a_status_error_is_translated(self, provider: AnthropicChatProvider) -> None:
+        _with_stream(
+            provider, [], FakeMessage(), raises=_status_error(anthropic.RateLimitError, 429)
+        )
+
+        with pytest.raises(AIUnavailableError):
+            _ = [e async for e in provider.stream(_request())]
+
+    async def test_a_connection_error_is_unavailable(self, provider: AnthropicChatProvider) -> None:
+        failure = anthropic.APIConnectionError(
+            request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+        )
+        _with_stream(provider, [], FakeMessage(), raises=failure)
+
+        with pytest.raises(AIUnavailableError):
+            _ = [e async for e in provider.stream(_request())]
+
+
+class TestComplete:
+    async def test_returns_text_usage_and_stop_reason(
+        self, provider: AnthropicChatProvider
+    ) -> None:
+        _with_stream(provider, [], FakeMessage())
+
+        completion = await provider.complete(_request())
+
+        assert completion.text == "A reply."
+        assert completion.model == "claude-opus-5"
+        assert completion.stop_reason == "end_turn"
+        assert completion.usage.output_tokens == 7
+
+    async def test_only_text_blocks_become_text(self, provider: AnthropicChatProvider) -> None:
+        final = FakeMessage(
+            content=[TextBlock("Part one. "), ToolUseBlock("c", "t", {}), TextBlock("Part two.")]
+        )
+        _with_stream(provider, [], final)
+
+        completion = await provider.complete(_request())
+
+        assert completion.text == "Part one. Part two."
+        assert len(completion.tool_calls) == 1
+
+    async def test_a_missing_cache_counter_reads_as_zero(
+        self, provider: AnthropicChatProvider
+    ) -> None:
+        """Not every response carries one, and a KeyError here would fail a
+        reply that had already succeeded."""
+        _with_stream(provider, [], FakeMessage(cache_read=None))
+
+        completion = await provider.complete(_request())
+
+        assert completion.usage.cache_read_tokens == 0
+
+    async def test_a_refusal_is_raised(self, provider: AnthropicChatProvider) -> None:
+        _with_stream(provider, [], FakeMessage(stop_reason="refusal"))
+
+        with pytest.raises(AIRefusalError):
+            await provider.complete(_request())
+
+    async def test_a_status_error_is_translated(self, provider: AnthropicChatProvider) -> None:
+        _with_stream(
+            provider, [], FakeMessage(), raises=_status_error(anthropic.InternalServerError, 500)
+        )
+
+        with pytest.raises(AIUnavailableError):
+            await provider.complete(_request())
+
+    async def test_a_connection_error_is_unavailable(self, provider: AnthropicChatProvider) -> None:
+        failure = anthropic.APIConnectionError(
+            request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+        )
+        _with_stream(provider, [], FakeMessage(), raises=failure)
+
+        with pytest.raises(AIUnavailableError):
+            await provider.complete(_request())
+
+
+class TestToolDefinitions:
+    def test_tools_are_sent_in_the_messages_api_shape(
+        self, provider: AnthropicChatProvider
+    ) -> None:
+        params = provider._build_params(
+            _request(
+                tools=(
+                    ToolDefinition(
+                        name="git_status",
+                        description="Repository state.",
+                        input_schema={"type": "object", "properties": {}},
+                    ),
+                )
+            )
+        )
+
+        assert params["tools"][0]["name"] == "git_status"
+        assert params["tools"][0]["input_schema"] == {"type": "object", "properties": {}}
+
+    def test_tool_results_go_in_a_user_turn_as_blocks(
+        self, provider: AnthropicChatProvider
+    ) -> None:
+        """There is no tool role here, unlike the OpenAI-shaped formats."""
+        params = provider._build_params(
+            _request(
+                messages=[
+                    ChatMessage(
+                        role="user",
+                        tool_results=(
+                            ToolOutcome(call_id="c1", name="git_status", content="clean"),
+                        ),
+                    )
+                ]
+            )
+        )
+
+        turn = params["messages"][0]
+        assert turn["role"] == "user"
+        assert turn["content"][0]["type"] == "tool_result"
+        assert turn["content"][0]["tool_use_id"] == "c1"
+        assert "clean" in turn["content"][0]["content"]
+
+    def test_an_assistant_turn_carries_text_then_its_calls(
+        self, provider: AnthropicChatProvider
+    ) -> None:
+        params = provider._build_params(
+            _request(
+                messages=[
+                    ChatMessage(
+                        role="assistant",
+                        content="Checking.",
+                        tool_calls=(ToolCall(id="c1", name="git_status", arguments={}),),
+                    )
+                ]
+            )
+        )
+
+        blocks = params["messages"][0]["content"]
+        assert [b["type"] for b in blocks] == ["text", "tool_use"]
+
+    def test_an_assistant_turn_with_calls_and_no_text_omits_the_text_block(
+        self, provider: AnthropicChatProvider
+    ) -> None:
+        params = provider._build_params(
+            _request(
+                messages=[
+                    ChatMessage(
+                        role="assistant",
+                        tool_calls=(ToolCall(id="c1", name="git_status", arguments={}),),
+                    )
+                ]
+            )
+        )
+
+        assert [b["type"] for b in params["messages"][0]["content"]] == ["tool_use"]
+
+
+class TestClosing:
+    async def test_closing_releases_the_sdk_client(self, provider: AnthropicChatProvider) -> None:
+        closed: list[bool] = []
+
+        async def close() -> None:
+            closed.append(True)
+
+        provider._client.close = close  # type: ignore[method-assign]
+        await provider.aclose()
+
+        assert closed == [True]

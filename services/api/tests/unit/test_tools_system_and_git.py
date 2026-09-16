@@ -189,6 +189,27 @@ class TestGitStatus:
         assert "clean" in result.content
         assert result.data["files"] == []
 
+    async def test_a_renamed_file_is_reported_by_its_new_name_alone(
+        self, repository: Path
+    ) -> None:
+        """Against real git output, because a fixture proved nothing here.
+
+        A "2 " record carries git's similarity score in an extra field ahead
+        of the path. Parsed with the field count for an ordinary change, the
+        score lands inside the filename and the tool reports a file called
+        "R100 docs/README.md".
+        """
+        await _git(repository, "checkout", "--", "README.md")
+        (repository / "docs").mkdir()
+        await _git(repository, "mv", "README.md", "docs/README.md")
+
+        tool = _tools([str(repository.parent)])["git_status"]
+        result = await tool.execute(tool.spec.input_model(path=str(repository)), _context())
+
+        by_path = {entry["path"]: entry["status"] for entry in result.data["files"]}
+        assert "docs/README.md" in by_path
+        assert not any(path.startswith("R") and " " in path for path in by_path)
+
     async def test_a_directory_that_is_not_a_repository_says_which(self, tmp_path: Path) -> None:
         """git in a non-repository prints a message about filesystem
         boundaries, which is true and unhelpful."""
