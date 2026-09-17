@@ -17,6 +17,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from nova.schemas.alert import AlertRead
 from nova.schemas.health import DependencyStatus
 
 
@@ -100,6 +101,15 @@ class ToolsStatus(BaseModel):
     failures_today: int
 
 
+class AlertsStatus(BaseModel):
+    """Whether NOVA is watching, and what it has noticed."""
+
+    watching: bool = Field(description="False when the watcher is turned off.")
+    interval_seconds: int
+    unacknowledged: int
+    latest: AlertRead | None = None
+
+
 class SystemStatus(BaseModel):
     """Everything the home screen needs, in one response."""
 
@@ -110,6 +120,7 @@ class SystemStatus(BaseModel):
     projects: list[ProjectStatus]
     memory: MemoryStatus
     tools: ToolsStatus
+    alerts: AlertsStatus | None = None
     recent_activity: list[ActivityEntry]
 
     @property

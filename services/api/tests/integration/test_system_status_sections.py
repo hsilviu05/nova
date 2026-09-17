@@ -25,6 +25,7 @@ from nova.ai.base import ChatCompletion, ChatRequest, StreamCompleted, StreamEve
 from nova.ai.errors import AIProviderError
 from nova.ai.registry import build_embedding_provider
 from nova.core.config import IntegrationSettings, ProjectTarget, Settings, ToolSettings
+from nova.repositories.alert import AlertRepository
 from nova.repositories.memory import MemoryRepository
 from nova.repositories.tool_invocation import ToolInvocationRepository
 from nova.services.health import HealthService
@@ -76,6 +77,7 @@ def service(
         memories=MemoryRepository(session),
         invocations=ToolInvocationRepository(session),
         embeddings=build_embedding_provider(settings.ai),
+        alerts=AlertRepository(session),
     )
 
 

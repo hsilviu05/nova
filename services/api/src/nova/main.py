@@ -7,6 +7,8 @@ settings without the module having already connected to something.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
@@ -27,6 +29,7 @@ from nova.middleware.errors import register_exception_handlers
 from nova.middleware.hardening import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from nova.middleware.request_context import RequestContextMiddleware
 from nova.repositories.memory import MemoryRepository
+from nova.services.watch import ProjectWatcher
 from nova.tools.registry import KnowledgeDependencies, build_registry
 
 logger = get_logger(__name__)
@@ -101,6 +104,19 @@ def _build_lifespan(
                     fix="python scripts/reembed_memories.py",
                 )
 
+        # The watcher is the one thing here that acts unprompted, so it is
+        # off unless configured on, and it needs projects to watch.
+        watcher_task: asyncio.Task[None] | None = None
+        if settings.watch.enabled and settings.integrations.projects:
+            watcher = ProjectWatcher(
+                settings=settings.watch,
+                integrations=settings.integrations,
+                registry=app.state.tool_registry,
+                session_factory=session_factory,
+            )
+            watcher_task = asyncio.create_task(watcher.run(), name="project-watcher")
+            app.state.watcher = watcher
+
         logger.info(
             "api_started",
             version=__version__,
@@ -108,10 +124,15 @@ def _build_lifespan(
             chat_provider=chat_provider.name,
             embedding_provider=embedding_provider.name,
             tools=len(app.state.tool_registry),
+            watching=[p.name for p in settings.integrations.projects] if watcher_task else [],
         )
         try:
             yield
         finally:
+            if watcher_task is not None:
+                watcher_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await watcher_task
             # Every acquisition is released, and each in its own try so one
             # failure cannot skip the rest and hang the process on shutdown.
             try:

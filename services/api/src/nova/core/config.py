@@ -267,6 +267,24 @@ class AISettings(BaseModel):
     message_rate_limit_window_seconds: int = Field(default=60, ge=1)
 
 
+class WatchSettings(BaseModel):
+    """Checking the configured projects on a timer, and raising alerts.
+
+    Off by default: a watcher is a process that makes requests nobody asked
+    for, and it should be a decision. When on, every project in
+    ``NOVA_INTEGRATIONS__PROJECTS`` is probed each interval through the same
+    tool the dashboard and chat use, and a change of state -- down after
+    ``failures_before_alert`` consecutive failures, or back up -- becomes an
+    alert the app shows and notifies about.
+    """
+
+    enabled: bool = False
+    interval_seconds: int = Field(default=300, ge=30, le=86400)
+    # One failed probe is a blip; two in a row is an outage. Alerting on the
+    # first would page for every dropped Wi-Fi packet.
+    failures_before_alert: int = Field(default=2, ge=1, le=20)
+
+
 class ObservabilitySettings(BaseModel):
     """Logging configuration."""
 
@@ -316,6 +334,7 @@ class Settings(BaseSettings):
     integrations: IntegrationSettings = Field(default_factory=IntegrationSettings)
     ai: AISettings = Field(default_factory=AISettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    watch: WatchSettings = Field(default_factory=WatchSettings)
 
     @property
     def is_production(self) -> bool:

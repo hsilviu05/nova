@@ -23,6 +23,7 @@ from nova.core.errors import AuthenticationError
 from nova.core.security import PasswordHasher, TokenService
 from nova.db.session import session_scope
 from nova.models.user import User
+from nova.repositories.alert import AlertRepository
 from nova.repositories.conversation import ConversationRepository, MessageRepository
 from nova.repositories.github_integration import GitHubIntegrationRepository
 from nova.repositories.memory import MemoryRepository
@@ -135,6 +136,10 @@ def get_tool_invocation_repository(session: SessionDep) -> ToolInvocationReposit
     return ToolInvocationRepository(session)
 
 
+def get_alert_repository(session: SessionDep) -> AlertRepository:
+    return AlertRepository(session)
+
+
 def get_tool_service(
     request: Request,
     registry: Annotated[ToolRegistry, Depends(get_tool_registry)],
@@ -232,6 +237,7 @@ def get_system_status_service(
     memories: Annotated[MemoryRepository, Depends(get_memory_repository)],
     invocations: Annotated[ToolInvocationRepository, Depends(get_tool_invocation_repository)],
     embeddings: Annotated[EmbeddingProvider, Depends(get_embedding_provider)],
+    alerts: Annotated[AlertRepository, Depends(get_alert_repository)],
 ) -> SystemStatusService:
     settings: Settings = request.app.state.settings
     return SystemStatusService(
@@ -242,6 +248,7 @@ def get_system_status_service(
         memories=memories,
         invocations=invocations,
         embeddings=embeddings,
+        alerts=alerts,
     )
 
 

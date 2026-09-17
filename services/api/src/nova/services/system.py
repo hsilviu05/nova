@@ -26,11 +26,14 @@ from nova.ai.errors import AIProviderError
 from nova.core.clock import utc_now
 from nova.core.config import IntegrationSettings, Settings
 from nova.core.logging import get_logger
+from nova.repositories.alert import AlertRepository
 from nova.repositories.memory import MemoryRepository
 from nova.repositories.tool_invocation import ToolInvocationRepository
+from nova.schemas.alert import AlertRead
 from nova.schemas.system import (
     ActivityEntry,
     AIStatus,
+    AlertsStatus,
     HostStatus,
     MemoryStatus,
     ProjectStatus,
@@ -69,6 +72,7 @@ class SystemStatusService:
         memories: MemoryRepository,
         invocations: ToolInvocationRepository,
         embeddings: EmbeddingProvider,
+        alerts: AlertRepository,
     ) -> None:
         self._settings = settings
         self._provider = provider
@@ -77,6 +81,7 @@ class SystemStatusService:
         self._memories = memories
         self._invocations = invocations
         self._embeddings = embeddings
+        self._alerts = alerts
 
     async def overview(self, owner_id: uuid.UUID) -> SystemStatus:
         """Everything at once, gathered concurrently.
@@ -97,6 +102,7 @@ class SystemStatusService:
         recent = await self._invocations.list_for_owner(owner_id, limit=RECENT_ACTIVITY)
         invocations_today = await self._invocations.count_since(owner_id, since=since)
         failures_today = await self._invocations.count_failures_since(owner_id, since=since)
+        alerts = await self._alerts_status()
 
         return SystemStatus(
             generated_at=utc_now(),
@@ -115,6 +121,7 @@ class SystemStatusService:
                 invocations_today=invocations_today,
                 failures_today=failures_today,
             ),
+            alerts=alerts,
             recent_activity=[ActivityEntry.model_validate(row) for row in recent],
         )
 
@@ -188,53 +195,24 @@ class SystemStatusService:
         )
 
     async def _project_status(self, owner_id: uuid.UUID) -> list[ProjectStatus]:
-        """Health for every configured project, checked in parallel.
+        """Health for every configured project; see :func:`check_projects`.
 
-        Goes through the tool rather than duplicating the HTTP call, so the
-        dashboard and "check SnapWorth" in chat answer from exactly the same
-        code. The invocations are not audited: this is a screen refreshing,
-        not somebody asking NOVA to do something, and filling the audit log
-        with dashboard polls would bury the entries that matter.
+        The invocations are not audited: this is a screen refreshing, not
+        somebody asking NOVA to do something, and filling the audit log with
+        dashboard polls would bury the entries that matter.
         """
-        integrations: IntegrationSettings = self._settings.integrations
-        if not integrations.projects or not self._registry.has("project_health"):
-            return []
+        return await check_projects(
+            self._registry, self._settings.integrations, context=ToolContext(user_id=owner_id)
+        )
 
-        tool = self._registry.get("project_health")
-        context = ToolContext(user_id=owner_id)
-        descriptions = {project.name: project.description for project in integrations.projects}
-
-        async def check(name: str) -> ProjectStatus:
-            try:
-                payload = tool.spec.input_model.model_validate({"project": name})
-                result = await asyncio.wait_for(
-                    tool.execute(payload, context),
-                    timeout=integrations.request_timeout_seconds + 2,
-                )
-            except Exception as exc:
-                # Including ToolError: a project NOVA cannot check is a
-                # project reported as unreachable, not a broken dashboard.
-                logger.info("project_check_failed", project=name, error=type(exc).__name__)
-                return ProjectStatus(
-                    name=name,
-                    healthy=False,
-                    reachable=False,
-                    description=descriptions.get(name),
-                )
-
-            data = result.data
-            return ProjectStatus(
-                name=name,
-                healthy=bool(data.get("healthy")),
-                reachable=bool(data.get("reachable")),
-                description=descriptions.get(name),
-                status_code=data.get("status_code"),
-                latency_ms=data.get("latency_ms"),
-                dependencies=data.get("dependencies") or {},
-            )
-
-        return list(
-            await asyncio.gather(*(check(project.name) for project in integrations.projects))
+    async def _alerts_status(self) -> AlertsStatus:
+        watch = self._settings.watch
+        latest = await self._alerts.list_recent(limit=1)
+        return AlertsStatus(
+            watching=watch.enabled and bool(self._settings.integrations.projects),
+            interval_seconds=watch.interval_seconds,
+            unacknowledged=await self._alerts.count_unacknowledged(),
+            latest=AlertRead.model_validate(latest[0]) if latest else None,
         )
 
     async def _memory_status(self, owner_id: uuid.UUID) -> MemoryStatus:
@@ -247,3 +225,50 @@ class SystemStatusService:
             embedding_provider=self._embeddings.name,
             stale=stale,
         )
+
+
+async def check_projects(
+    registry: ToolRegistry, integrations: IntegrationSettings, *, context: ToolContext
+) -> list[ProjectStatus]:
+    """Health for every configured project, checked in parallel.
+
+    Goes through the ``project_health`` tool rather than duplicating the HTTP
+    call, so the dashboard, the watcher and "check SnapWorth" in chat answer
+    from exactly the same code.
+    """
+    if not integrations.projects or not registry.has("project_health"):
+        return []
+
+    tool = registry.get("project_health")
+    descriptions = {project.name: project.description for project in integrations.projects}
+
+    async def check(name: str) -> ProjectStatus:
+        try:
+            payload = tool.spec.input_model.model_validate({"project": name})
+            result = await asyncio.wait_for(
+                tool.execute(payload, context),
+                timeout=integrations.request_timeout_seconds + 2,
+            )
+        except Exception as exc:
+            # Including ToolError: a project NOVA cannot check is a project
+            # reported as unreachable, not a broken dashboard.
+            logger.info("project_check_failed", project=name, error=type(exc).__name__)
+            return ProjectStatus(
+                name=name,
+                healthy=False,
+                reachable=False,
+                description=descriptions.get(name),
+            )
+
+        data = result.data
+        return ProjectStatus(
+            name=name,
+            healthy=bool(data.get("healthy")),
+            reachable=bool(data.get("reachable")),
+            description=descriptions.get(name),
+            status_code=data.get("status_code"),
+            latency_ms=data.get("latency_ms"),
+            dependencies=data.get("dependencies") or {},
+        )
+
+    return list(await asyncio.gather(*(check(project.name) for project in integrations.projects)))
