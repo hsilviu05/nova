@@ -34,9 +34,37 @@ from nova.ai.base import ToolDefinition
 
 
 class NoArguments(BaseModel):
-    """The input model for a tool that takes nothing."""
+    """The input model for a tool that takes nothing.
 
-    model_config = ConfigDict(extra="forbid")
+    ``extra="ignore"`` here, where every tool that declares real parameters
+    uses ``extra="forbid"``. The difference is deliberate and narrow.
+
+    Forbidding extras on a tool with parameters is what stops a model
+    inventing an argument that quietly changes what runs. A tool that
+    declares *no* parameters has nothing an argument could change, so the
+    only thing a refusal buys is a wasted round trip -- and small local
+    models, which are the point of running NOVA on your own machine, emit a
+    junk argument for a no-argument tool routinely. llama3.2 calling
+    ``system_health`` with an invented key turned "is this machine healthy"
+    into "System health check failed", which is both wrong and alarming.
+
+    ``json_schema_extra`` restores ``additionalProperties: false`` to the
+    published schema, which ``extra="ignore"`` would otherwise drop: a model
+    that reads the schema is still told to send nothing, and this only
+    decides what happens when one does anyway.
+
+    It also replaces the description. This schema is sent to the model on
+    every turn, so the note you are reading would otherwise be spent from
+    the context window several times over.
+    """
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
+            "description": "Takes no arguments.",
+            "additionalProperties": False,
+        },
+    )
 
 
 class Permission(enum.StrEnum):

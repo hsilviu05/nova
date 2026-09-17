@@ -613,6 +613,74 @@ class TestDiskUsage:
             DiskUsageInput(path="/" + "a" * 512)
 
 
+class TestArgumentsAModelInvents:
+    """A no-argument tool tolerates junk; a tool with arguments does not.
+
+    Small local models emit a spurious key for a parameterless tool
+    constantly, and NOVA exists to be run against small local models. The
+    refusal used to cost a whole turn and surface as "System health check
+    failed" -- a wrong and alarming answer to "is this machine healthy".
+    """
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            {},
+            {"random_string": ""},
+            {"service": "api"},
+            {"thought": "checking the machine"},
+        ],
+    )
+    async def test_a_parameterless_tool_runs_whatever_it_is_handed(
+        self, tools: dict[str, Any], context: ToolContext, arguments: dict[str, Any]
+    ) -> None:
+        tool = tools["system_health"]
+
+        payload = tool.spec.input_model.model_validate(arguments)
+        result = await tool.execute(payload, context)
+
+        assert result.is_error is False
+        assert "healthy" in result.content.lower() or "pressure" in result.content.lower()
+
+    def test_the_schema_still_tells_a_model_not_to_send_anything(
+        self, tools: dict[str, Any]
+    ) -> None:
+        """Tolerance is the fallback, not the advertised contract.
+
+        `extra="ignore"` drops `additionalProperties: false` from the
+        generated schema, so it is put back explicitly -- otherwise the model
+        is never told there is nothing to send.
+        """
+        schema = tools["system_health"].spec.input_schema
+
+        assert schema["additionalProperties"] is False
+        assert schema.get("properties", {}) == {}
+
+    def test_the_schema_does_not_spend_context_explaining_itself(
+        self, tools: dict[str, Any]
+    ) -> None:
+        """This schema goes into the prompt on every turn, once per tool.
+
+        Pydantic publishes a model's docstring as the schema description, and
+        the note on `NoArguments` is a long one written for whoever maintains
+        it -- not for a model deciding whether to call `system_health`.
+        """
+        description = tools["system_health"].spec.input_schema.get("description", "")
+
+        assert description == "Takes no arguments."
+
+    def test_a_tool_with_arguments_still_refuses_an_invented_one(
+        self, tools: dict[str, Any]
+    ) -> None:
+        """The narrowing applies only where there is nothing to corrupt. A
+        tool that takes a path must not run against an argument the model
+        made up next to it."""
+        with pytest.raises(ValidationError):
+            tools["disk_usage"].spec.input_model.model_validate(
+                {"path": "/srv/data", "recursive": True}
+            )
+
+
 class TestTheGroup:
     def test_every_system_tool_is_read_only(self, tools: dict[str, Any]) -> None:
         """Nothing here changes the machine, so nothing here can be reached
