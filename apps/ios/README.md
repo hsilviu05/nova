@@ -95,6 +95,7 @@ NOVA/
     ├── Dashboard/  the glanceable screen: AI, machine, projects, memory, tools
     ├── Chat/       streaming replies, tool activity, confirmations
     ├── History/    past threads, searchable by title or anything said
+    ├── Intents/    Siri and Shortcuts: "is SnapWorth up?" without opening the app
     ├── Memory/     what NOVA knows, editable and deletable
     ├── Tools/      what NOVA can do, and doing it by hand
     ├── Voice/      speech in and out, off by default
@@ -146,6 +147,29 @@ microphone.
 `SpeechRecogniser` and `Speaker` are protocols so a local Whisper on the same
 Mac as the model can replace the Apple implementations later — a new file
 rather than a refactor.
+
+## Siri and Shortcuts
+
+Two App Intents ship with the app and need no setup in the Shortcuts app:
+
+> "Is SnapWorth up in NOVA?"
+> "How is NOVA?"
+
+The first resolves the project name against the ones the server knows, so
+"snap" is enough, and reads out the same verdict the dashboard shows: healthy
+or not, how fast it answered, and which of its dependencies are down. The
+second is the dashboard's status line as one sentence.
+
+They run in the app's own process with the same stored address and session,
+reach only the read-only status endpoint, and can change nothing. With no
+session stored they say so rather than failing silently. The wording lives in
+`StatusPhrasing`, which is where the tests are.
+
+A lock-screen widget is not included yet: it needs a widget extension, an
+App Group to share the session with, and Keychain sharing, all of which need
+a signing team in the project before they will build. That is a one-line
+change once a team is set, and the intents above are the half that does not
+need one.
 
 ## Testing
 

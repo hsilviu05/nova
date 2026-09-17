@@ -244,6 +244,10 @@ Four things worth knowing:
 - **iOS will ask for local network permission** the first time. Denying it
   means the app cannot reach your Mac at all.
 
+Once signed in, Siri knows two phrases with no setup: *"Is SnapWorth up in
+NOVA?"* and *"How is NOVA?"* Both read out the dashboard's verdict from the
+lock screen, reach only the read-only status endpoint, and can change nothing.
+
 For a phone living on a desk: **Settings → Display & Brightness → Auto-Lock →
 Never**, and leave it on the charger. NOVA does nothing to defeat the lock
 screen or keep itself running in the background; the dashboard polls while it
@@ -462,6 +466,9 @@ Deliberately not built yet, and each for a reason:
 - **Push notifications.** "Tell me when the deploy fails" needs a scheduler
   and an APNs certificate, which is a project of its own.
 - **Multiple servers.** One address, one account, today.
+- **A lock-screen widget.** Needs a widget extension, an App Group and
+  Keychain sharing, which need a signing team in the project. The Siri
+  intents are the half of that idea that works without one.
 
 Explicitly **not** planned: autonomous agents that run unattended, unrestricted
 shell access, multi-agent orchestration, Kubernetes, public deployment.
