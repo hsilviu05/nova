@@ -91,6 +91,7 @@ extension SystemStatus {
             projects: projects,
             memory: MemoryStatus(total: 0, recent: [], embeddingProvider: "lexical", stale: 0),
             tools: ToolsStatus(count: 0, groups: [], shellEnabled: false, invocationsToday: 0, failuresToday: 0),
+            alerts: nil,
             recentActivity: []
         )
     }

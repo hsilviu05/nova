@@ -14,6 +14,8 @@ struct SystemStatus: Decodable, Equatable, Sendable {
     let projects: [ProjectStatus]
     let memory: MemoryStatus
     let tools: ToolsStatus
+    /// Absent on servers older than the watcher.
+    let alerts: AlertsStatus?
     let recentActivity: [ActivityEntry]
 
     /// One verdict for the status line at the top of the screen.

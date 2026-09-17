@@ -23,6 +23,9 @@ final class DashboardModel {
     static let refreshInterval: Duration = .seconds(15)
 
     private(set) var status: SystemStatus?
+    /// Unacknowledged alerts, newest first. Fetched only when the status says
+    /// there are some, so a quiet NOVA costs one request per poll, not two.
+    private(set) var alerts: [Alert] = []
     private(set) var lastUpdated: Date?
     private(set) var isRefreshing = false
     /// The last refresh failed. The reading above, if any, is older than it
@@ -31,6 +34,10 @@ final class DashboardModel {
     var error: APIError?
 
     private var ticker: Task<Void, Never>?
+    private var tracker = AlertTracker()
+    private var hasPrimedAlerts = false
+    /// Where a new alert is announced. Nil in tests and previews.
+    var presenter: (any AlertPresenter)?
 
     var hasLoaded: Bool { status != nil }
 
@@ -46,10 +53,12 @@ final class DashboardModel {
         defer { isRefreshing = false }
 
         do {
-            status = try await api.systemStatus()
+            let fresh = try await api.systemStatus()
+            status = fresh
             lastUpdated = .now
             isStale = false
             error = nil
+            await refreshAlerts(using: api, expected: fresh.alerts?.unacknowledged ?? 0)
         } catch let apiError as APIError {
             error = apiError
             // Keep whatever was already on screen; it is still the most
@@ -58,6 +67,49 @@ final class DashboardModel {
         } catch {
             self.error = .undecodable(status: 0, underlying: "\(error)")
             isStale = true
+        }
+    }
+
+    /// Pull the unacknowledged alerts when the status says there are any,
+    /// and announce the ones not announced before.
+    ///
+    /// The first fetch after launch primes the tracker instead of presenting:
+    /// what was already on the server when the app opened is history, not
+    /// news, and a phone that greets you with six banners for last night's
+    /// outage has taught you to swipe them away unread.
+    private func refreshAlerts(using api: any NovaAPI, expected: Int) async {
+        guard expected > 0 else {
+            alerts = []
+            hasPrimedAlerts = true
+            return
+        }
+        guard let page = try? await api.alerts(unacknowledgedOnly: true) else { return }
+        alerts = page.items
+        if !hasPrimedAlerts {
+            tracker.prime(with: page.items)
+            hasPrimedAlerts = true
+            return
+        }
+        for alert in tracker.unseen(in: page.items) {
+            await presenter?.present(alert)
+        }
+    }
+
+    /// Clear one alert, or all of them.
+    func acknowledge(_ alert: Alert?, using api: any NovaAPI) async {
+        do {
+            if let alert {
+                _ = try await api.acknowledgeAlert(id: alert.id)
+                alerts.removeAll { $0.id == alert.id }
+            } else {
+                _ = try await api.acknowledgeAllAlerts()
+                alerts = []
+            }
+            error = nil
+        } catch let apiError as APIError {
+            error = apiError
+        } catch {
+            self.error = .undecodable(status: 0, underlying: "\(error)")
         }
     }
 

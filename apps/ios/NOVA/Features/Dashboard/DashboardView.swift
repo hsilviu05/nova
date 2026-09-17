@@ -31,6 +31,9 @@ struct DashboardView: View {
             .refreshable { await model.load(using: api) }
         }
         .task {
+            if model.presenter == nil {
+                model.presenter = LocalNotificationPresenter()
+            }
             model.startPolling(using: api)
         }
         .onDisappear { model.stopPolling() }
@@ -50,6 +53,21 @@ struct DashboardView: View {
     private func content(_ status: SystemStatus) -> some View {
         VStack(spacing: 16) {
             VerdictCard(status: status, isStale: model.isStale, updated: model.lastUpdated)
+
+            if !model.alerts.isEmpty {
+                AlertsCard(
+                    alerts: model.alerts,
+                    onAcknowledge: { alert in Task { await model.acknowledge(alert, using: api) } },
+                    onClear: { Task { await model.acknowledge(nil, using: api) } }
+                )
+            } else if let watch = status.alerts, watch.watching {
+                Card(title: "Watching", symbol: "eye") {
+                    Text("Every \(watch.intervalSeconds / 60 > 0 ? "\(watch.intervalSeconds / 60) min" : "\(watch.intervalSeconds) s"), nothing to report.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             AICard(ai: status.ai)
             HostCard(host: status.host, dependencies: status.dependencies)
 
@@ -69,6 +87,41 @@ struct DashboardView: View {
 }
 
 // MARK: - Cards
+
+private struct AlertsCard: View {
+    let alerts: [Alert]
+    let onAcknowledge: (Alert) -> Void
+    let onClear: () -> Void
+
+    var body: some View {
+        Card(title: "Alerts", symbol: "bell.badge") {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(alerts) { alert in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: alert.isDown ? "xmark.octagon.fill" : "checkmark.circle.fill")
+                            .foregroundStyle(alert.isDown ? .red : .green)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(alert.message)
+                                .font(.subheadline)
+                            Text(alert.createdAt, format: .relative(presentation: .named))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Clear", systemImage: "checkmark") { onAcknowledge(alert) }
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel("Clear alert for \(alert.project)")
+                    }
+                }
+                if alerts.count > 1 {
+                    Button("Clear all", action: onClear)
+                        .font(.footnote)
+                }
+            }
+        }
+    }
+}
 
 /// The one line worth reading from across a desk.
 private struct VerdictCard: View {

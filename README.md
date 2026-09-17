@@ -244,6 +244,12 @@ Four things worth knowing:
 - **iOS will ask for local network permission** the first time. Denying it
   means the app cannot reach your Mac at all.
 
+With `NOVA_WATCH__ENABLED=true`, the server probes every configured project
+on a timer and raises an alert when one goes down or comes back — after two
+failed checks in a row, not one, so a dropped packet is not an outage. The
+dashboard shows the alerts until cleared, and the phone raises a banner for
+each new one while the app is open.
+
 Once signed in, Siri knows two phrases with no setup: *"Is SnapWorth up in
 NOVA?"* and *"How is NOVA?"* Both read out the dashboard's verdict from the
 lock screen, reach only the read-only status endpoint, and can change nothing.
@@ -463,8 +469,12 @@ Deliberately not built yet, and each for a reason:
 
 - **Local Whisper.** The `SpeechRecogniser` protocol exists precisely so this
   is a new file rather than a refactor.
-- **Push notifications.** "Tell me when the deploy fails" needs a scheduler
-  and an APNs certificate, which is a project of its own.
+- **Push to a closed app.** The watcher raises alerts and the phone shows
+  them as banners while NOVA is open, which for a phone on a stand is most
+  of the time. Reaching a phone in a pocket is APNs: an Apple key, an
+  entitlement and a signing team, none of which this repository can carry.
+  The notifier is a protocol with one method, so it is a new class, not a
+  redesign.
 - **Multiple servers.** One address, one account, today.
 - **A lock-screen widget.** Needs a widget extension, an App Group and
   Keychain sharing, which need a signing team in the project. The Siri

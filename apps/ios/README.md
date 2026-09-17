@@ -202,6 +202,10 @@ done with the permission.
   shows what was said, without the machinery. The audit log under
   Dashboard → recent activity is where "what did NOVA run" is answered
   permanently.
-- **No push notifications.** "Tell me when the deploy fails" needs a scheduler
-  and an APNs certificate.
+- **Notifications only while the app is open.** The server's watcher raises
+  alerts; the dashboard polls for them and raises a local banner for each new
+  one, including in the foreground. Reaching a closed app is APNs, which
+  needs an Apple key, an entitlement and a signing team. Alerts already on
+  the server when the app opens are shown on the dashboard but not announced:
+  history, not news.
 - **One server at a time.** Switching is a Settings change and a sign-out.

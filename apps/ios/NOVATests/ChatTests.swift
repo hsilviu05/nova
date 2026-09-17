@@ -226,6 +226,9 @@ private final class StubAPI: NovaAPI {
     nonisolated func deleteMemory(id: UUID) async throws {}
     nonisolated func forgetEverything() async throws {}
     nonisolated func systemStatus() async throws -> SystemStatus { throw APIError.unauthenticated }
+    nonisolated func alerts(unacknowledgedOnly: Bool) async throws -> AlertPage { AlertPage(items: [], unacknowledged: 0) }
+    nonisolated func acknowledgeAlert(id: UUID) async throws -> Alert { throw APIError.unauthenticated }
+    nonisolated func acknowledgeAllAlerts() async throws -> AcknowledgedCount { AcknowledgedCount(acknowledged: 0) }
     nonisolated func activity(limit: Int) async throws -> ActivityPage { throw APIError.unauthenticated }
     nonisolated func tools() async throws -> ToolList { throw APIError.unauthenticated }
     nonisolated func githubIntegration() async throws -> GitHubIntegration { throw APIError.unauthenticated }

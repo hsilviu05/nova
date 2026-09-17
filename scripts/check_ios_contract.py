@@ -49,6 +49,10 @@ MODELS = {
     "ToolRunResult": "ToolResultRead",
     "GitHubIntegration": "GitHubIntegrationRead",
     "GitHubIntegrationCreated": "GitHubIntegrationCreated",
+    "Alert": "AlertRead",
+    "AlertPage": "AlertPage",
+    "AlertsStatus": "AlertsStatus",
+    "AcknowledgedCount": "AcknowledgedCount",
 }
 
 # Swift structs whose names differ from the schema's, where the *field* names

@@ -15,9 +15,11 @@
 		0F4FBAB1ECC5B03270BAD64D /* MemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C64BF77983452BF5A54020A1 /* MemoryView.swift */; };
 		0F8F10D28DCFC316BE4A9CE8 /* NovaAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7BC025DE6DCA7056D192DEF /* NovaAPI.swift */; };
 		1987ADA7EDC40A189F3BE3F2 /* ToolsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72AD83A8123632F2B3683CA7 /* ToolsModel.swift */; };
+		1DDC45C9A0B9BBFCB121D58A /* AlertTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D0640A791FCDBA4096BF699 /* AlertTrackerTests.swift */; };
 		1E834705B89F92FF8B159AF8 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB94C7E97D125A1E2180577 /* HistoryView.swift */; };
 		28EB39D19CF5F054BD01AFAB /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 30B6C985392A9981E35EE211 /* PrivacyInfo.xcprivacy */; };
 		353DE9EF94CE1622456BD091 /* VoiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4FA9D42B09A1BA4BD487838 /* VoiceTests.swift */; };
+		384F400999179348D6C33DE2 /* Alert.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37DB402A97413E26F92745CA /* Alert.swift */; };
 		38C649CEB69E5096EAFF46E0 /* StatusPhrasing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 808C4D38BA96D9965C295F7B /* StatusPhrasing.swift */; };
 		4194D98E9447FF15D10A99DF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2216A5EBCC1192FF9D08E97E /* SettingsView.swift */; };
 		42B556F5209794873E45CCE0 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2881B09992ECA7757CCAD154 /* DashboardView.swift */; };
@@ -50,6 +52,7 @@
 		C3B711F847383256F052F515 /* MemoryDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54EFE3DED67B42FC763D6A90 /* MemoryDecodingTests.swift */; };
 		C704BCCC7BA2D365A693BDB2 /* TokenStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA6C2179053F740428166109 /* TokenStoreTests.swift */; };
 		DB5ADC673A6B22C1B478138A /* JSONCoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCBCEA513BE3CD7E8879605 /* JSONCoding.swift */; };
+		DE3345528AD08F1154897BC9 /* AlertNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A534146A3CD6351B6252A94 /* AlertNotifier.swift */; };
 		E8717E5F09D2BBEB5789FEDD /* Memory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96C1EBAE0C2536485764AF6A /* Memory.swift */; };
 		F3C86CA815408B1BE2040244 /* MemoryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52D39D919704AF3DAA7B168F /* MemoryModel.swift */; };
 		F71863FFA2280F33F7510499 /* ToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC66E28C4CFEBDBF7A13792 /* ToolsView.swift */; };
@@ -81,6 +84,7 @@
 		30B6C985392A9981E35EE211 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		34AB1B510F418016E1418F7F /* ChatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTests.swift; sourceTree = "<group>"; };
 		35A2EDC8DC8EE5D9B33BD5CD /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
+		37DB402A97413E26F92745CA /* Alert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Alert.swift; sourceTree = "<group>"; };
 		3C8CBAA986434101F019745C /* NOVA.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = NOVA.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3CB94C7E97D125A1E2180577 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		4693F2CF189F93C51914CA2F /* SystemStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemStatus.swift; sourceTree = "<group>"; };
@@ -99,12 +103,14 @@
 		7069B2CE2EA525B5B795A725 /* VoiceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceStore.swift; sourceTree = "<group>"; };
 		721EB62492752AC989F31DE6 /* StubTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StubTransport.swift; sourceTree = "<group>"; };
 		72AD83A8123632F2B3683CA7 /* ToolsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolsModel.swift; sourceTree = "<group>"; };
+		7D0640A791FCDBA4096BF699 /* AlertTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertTrackerTests.swift; sourceTree = "<group>"; };
 		808C4D38BA96D9965C295F7B /* StatusPhrasing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusPhrasing.swift; sourceTree = "<group>"; };
 		80B775EC84D182AE6E8864D4 /* APIError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIError.swift; sourceTree = "<group>"; };
 		84954169B7F867C2D068CE23 /* ChatModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModel.swift; sourceTree = "<group>"; };
 		89806C50FEE0177BFB6BF774 /* ChatStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStream.swift; sourceTree = "<group>"; };
 		9378DC3C160BA866B68D2035 /* TokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenStore.swift; sourceTree = "<group>"; };
 		96C1EBAE0C2536485764AF6A /* Memory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Memory.swift; sourceTree = "<group>"; };
+		9A534146A3CD6351B6252A94 /* AlertNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertNotifier.swift; sourceTree = "<group>"; };
 		A4FA9D42B09A1BA4BD487838 /* VoiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTests.swift; sourceTree = "<group>"; };
 		A99C8B7828406BCBB9C5DEAC /* JSONValue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONValue.swift; sourceTree = "<group>"; };
 		A9F2D3EBC9621146C4E903F2 /* DashboardModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardModel.swift; sourceTree = "<group>"; };
@@ -134,6 +140,7 @@
 				35A2EDC8DC8EE5D9B33BD5CD /* Session.swift */,
 				4693F2CF189F93C51914CA2F /* SystemStatus.swift */,
 				536A58A1386FC0C90BFBD39F /* Tool.swift */,
+				37DB402A97413E26F92745CA /* Alert.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -174,6 +181,7 @@
 			children = (
 				A9F2D3EBC9621146C4E903F2 /* DashboardModel.swift */,
 				2881B09992ECA7757CCAD154 /* DashboardView.swift */,
+				9A534146A3CD6351B6252A94 /* AlertNotifier.swift */,
 			);
 			path = Dashboard;
 			sourceTree = "<group>";
@@ -241,6 +249,7 @@
 				A4FA9D42B09A1BA4BD487838 /* VoiceTests.swift */,
 				652F4ABFBCCA44425458CC40 /* HistoryTests.swift */,
 				080E45A48A91E609E29F7B8D /* IntentPhrasingTests.swift */,
+				7D0640A791FCDBA4096BF699 /* AlertTrackerTests.swift */,
 			);
 			path = NOVATests;
 			sourceTree = "<group>";
@@ -432,6 +441,8 @@
 				1E834705B89F92FF8B159AF8 /* HistoryView.swift in Sources */,
 				38C649CEB69E5096EAFF46E0 /* StatusPhrasing.swift in Sources */,
 				50CF410EA5CCE33C0C5897B7 /* NovaIntents.swift in Sources */,
+				384F400999179348D6C33DE2 /* Alert.swift in Sources */,
+				DE3345528AD08F1154897BC9 /* AlertNotifier.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -451,6 +462,7 @@
 				353DE9EF94CE1622456BD091 /* VoiceTests.swift in Sources */,
 				AC104E41968F1A8CCE27F92B /* HistoryTests.swift in Sources */,
 				7C1C44EB86120E670F9C9FD9 /* IntentPhrasingTests.swift in Sources */,
+				1DDC45C9A0B9BBFCB121D58A /* AlertTrackerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

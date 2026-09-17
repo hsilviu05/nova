@@ -30,6 +30,10 @@ protocol NovaAPI: Sendable {
     func forgetEverything() async throws
 
     func systemStatus() async throws -> SystemStatus
+
+    func alerts(unacknowledgedOnly: Bool) async throws -> AlertPage
+    func acknowledgeAlert(id: UUID) async throws -> Alert
+    func acknowledgeAllAlerts() async throws -> AcknowledgedCount
     func activity(limit: Int) async throws -> ActivityPage
 
     func tools() async throws -> ToolList
@@ -212,6 +216,22 @@ struct LiveNovaAPI: NovaAPI {
     /// worse than one that says it could not reach something.
     func systemStatus() async throws -> SystemStatus {
         try await client.send(Request(path: "system/status", timeout: 30))
+    }
+
+    func alerts(unacknowledgedOnly: Bool) async throws -> AlertPage {
+        try await client.send(
+            Request(path: "alerts", query: unacknowledgedOnly ? ["unacknowledged": "true"] : [:])
+        )
+    }
+
+    func acknowledgeAlert(id: UUID) async throws -> Alert {
+        try await client.send(
+            Request(method: .post, path: "alerts/\(id.uuidString.lowercased())/acknowledge")
+        )
+    }
+
+    func acknowledgeAllAlerts() async throws -> AcknowledgedCount {
+        try await client.send(Request(method: .post, path: "alerts/acknowledge-all"))
     }
 
     func activity(limit: Int = 50) async throws -> ActivityPage {
