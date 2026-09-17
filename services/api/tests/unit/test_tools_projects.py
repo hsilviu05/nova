@@ -68,6 +68,22 @@ class TestListing:
         assert "AIInterviewCoach" in result.content
         assert len(result.data["projects"]) == 2
 
+    async def test_the_listing_says_it_has_checked_nothing(self) -> None:
+        """Observed with a 4B model: asked "is Model up?" it called
+        `project_list`, read the description, and answered "Model is up" --
+        a guess dressed as a status, because the listing looked like an
+        answer. Saying what it did not do, and naming the tool that does,
+        turns it back into a step.
+        """
+        result = await tools(response())["project_list"].execute(
+            ProjectHealthInput(project="x"), context()
+        )
+
+        assert "nothing here has been checked" in result.content
+        assert "project_health" in result.content
+        # The names are still the first thing read.
+        assert result.content.startswith("SnapWorth")
+
     async def test_nothing_configured_says_so_rather_than_returning_nothing(self) -> None:
         """An empty string reads to a model as a failure, and it retries."""
         result = await tools(response(), projects=[])["project_list"].execute(

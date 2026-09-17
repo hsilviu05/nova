@@ -90,6 +90,16 @@ class ProjectListTool(_ProjectTool):
             f"{p['name']}" + (f" — {p['description']}" if p["description"] else "")
             for p in projects
         ]
+        # Says what it did *not* do. A small model asked "is X up" reaches for
+        # this tool first -- the description invites it to -- and then answers
+        # from the description it just read, which is a guess dressed as a
+        # status. Naming the tool that actually checks is what turns the
+        # listing into a step rather than an answer.
+        lines.append(
+            "\nThese are names and descriptions only; nothing here has been "
+            "checked. Call project_health with one of these names to find out "
+            "whether it is actually up."
+        )
         return ToolResult(content="\n".join(lines), data={"projects": projects})
 
 
