@@ -38,6 +38,20 @@ targets:
     platform: iOS
     sources:
       - path: NOVA
+        # Excluded because `INFOPLIST_FILE` below already points at it. Left
+        # in the source list it is *also* copied in as a resource, and the
+        # bundle ends up with a second "Info 2.plist" holding an unexpanded
+        # $(INFOPLIST_KEY_NOVABaseURL) and only half the ATS block. Harmless
+        # at runtime, rejected by App Store validation, and confusing to
+        # anyone who opens the built app.
+        excludes:
+          - Info.plist
+    dependencies:
+      # Linked explicitly. `import AppIntents` alone compiles, but without
+      # the framework on the link line `appintentsmetadataprocessor` skips
+      # extraction -- no Metadata.appintents in the bundle, so the two Siri
+      # phrases in the README register with nothing and silently do nothing.
+      - sdk: AppIntents.framework
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nova.app

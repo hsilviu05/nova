@@ -39,6 +39,14 @@ protocol AlertPresenter: Sendable {
 ///
 /// Local rather than push: no APNs, no key, no entitlement. The trade is
 /// that the app has to be running to notice, and the README says so.
+///
+/// `@MainActor` because it is neither a value nor immutable: it holds the
+/// notification centre, which is not `Sendable`, and a latch recording
+/// whether authorisation has been asked for. `AlertPresenter` is `Sendable`,
+/// and a class with mutable state cannot be -- isolating it to the main
+/// actor is what makes the conformance true rather than asserted. The
+/// dashboard that calls this is already on the main actor, so nothing hops.
+@MainActor
 final class LocalNotificationPresenter: NSObject, AlertPresenter, UNUserNotificationCenterDelegate {
     private let center = UNUserNotificationCenter.current()
     private var asked = false
@@ -66,7 +74,14 @@ final class LocalNotificationPresenter: NSObject, AlertPresenter, UNUserNotifica
 
     // Shown as a banner even when the app is in the foreground. Without this
     // delegate method iOS suppresses foreground notifications entirely.
-    func userNotificationCenter(
+    //
+    // `nonisolated` because iOS calls it from its own context and neither
+    // parameter is `Sendable`. It reads nothing and returns a constant, so
+    // there is no state to protect -- marking just this method is narrower
+    // than a `@preconcurrency import`, which would relax the check for every
+    // use of UserNotifications in the file including the ones that do touch
+    // state.
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
