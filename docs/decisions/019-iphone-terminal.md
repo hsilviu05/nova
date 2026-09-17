@@ -1,4 +1,4 @@
-# 015 — The phone is the terminal, and the robot is gone
+# 019 — The phone is the terminal, and the robot is gone
 
 **Status:** Accepted · **Date:** 2026-09-16
 

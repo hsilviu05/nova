@@ -226,7 +226,14 @@ Build to the phone, then in the app: **Settings → NOVA server** and enter the
 address of the Mac on your network — `http://192.168.1.20:8000`, or
 `http://your-mac.local:8000`.
 
-Three things worth knowing:
+Four things worth knowing:
+
+- **"Old" means 2018 or newer.** The app targets iOS 18, which runs on the
+  iPhone XS, XR and everything since. iOS 17 supports exactly the same phones,
+  so there is nothing to gain by lowering the target one version; going to
+  iOS 16 would admit the iPhone 8 and X, at the cost of rewriting every
+  `@Observable` model. Not done unless a phone that old is the one going in
+  the stand.
 
 - **`127.0.0.1` is the phone.** The default build address only works in the
   simulator. The Settings screen says so when it is still set.
