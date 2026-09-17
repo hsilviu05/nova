@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
 from fastapi import FastAPI
@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession, a
 from nova.ai.base import ChatProvider, EmbeddingProvider
 from nova.ai.registry import build_chat_provider, build_embedding_provider
 from nova.core.config import (
+    AISettings,
     DatabaseSettings,
     JWTSettings,
     ObservabilitySettings,
@@ -97,6 +98,23 @@ def build_test_app(
     return app
 
 
+@pytest.fixture(autouse=True)
+def _clear_probe_cache() -> Iterator[None]:
+    """Reset the AI probe cache around every test.
+
+    It is deliberately process-wide -- SystemStatusService is built per
+    request, so an instance attribute would cache nothing -- which means it
+    also outlives a test. Without this, a test that probes a failing model
+    hands its verdict to the next one, and the failure reads as a wrong
+    message rather than as leaked state.
+    """
+    import nova.services.system as system
+
+    system._probe_cache = None
+    yield
+    system._probe_cache = None
+
+
 @pytest.fixture(scope="session")
 def settings() -> Settings:
     """Test settings.
@@ -106,6 +124,12 @@ def settings() -> Settings:
     without testing anything the low factors do not.
     """
     return Settings(
+        # No dotenv. `Settings.model_config` reads ("../../.env", ".env"), so
+        # without this the suite inherits whatever the developer happens to
+        # have configured -- and four tests fail on a machine with a working
+        # .env while CI, which has none, stays green. A test whose result
+        # depends on an untracked file is not a test.
+        _env_file=None,
         environment="test",
         database=_test_database_settings(),
         redis=RedisSettings(
@@ -123,6 +147,11 @@ def settings() -> Settings:
             auth_rate_limit_attempts=1000,
         ),
         observability=ObservabilitySettings(log_level="WARNING", log_json=True),
+        # Stated rather than defaulted, so an exported NOVA_AI__* in the
+        # developer's shell cannot reach the suite either. The offline
+        # provider and the lexical embedder are what let the whole
+        # conversation path run with no model server, no key and no network.
+        ai=AISettings(),
         tools=ToolSettings(
             # Nothing that shells out. The suite runs on CI machines where
             # docker and git may or may not exist, and a test that passes

@@ -82,6 +82,11 @@ def service(
 
 
 class TestTheAICard:
+    def _service_for(
+        self, settings: Settings, session: AsyncSession, provider: Any
+    ) -> SystemStatusService:
+        return service(settings, session, provider=provider)
+
     async def test_a_model_that_answers_is_reported_with_its_latency(
         self, settings: Settings, session: AsyncSession
     ) -> None:
@@ -101,6 +106,108 @@ class TestTheAICard:
         assert status.latency_ms is not None
         assert status.latency_ms >= 0
         assert status.detail is None
+
+    async def test_polling_the_dashboard_does_not_re_probe_the_model_each_time(
+        self, settings: Settings, session: AsyncSession
+    ) -> None:
+        """The reason the probe is cached at all.
+
+        The phone refreshes every fifteen seconds and the probe is a real
+        completion, so without a cache a device sitting in a desk stand asks
+        a local model to generate something four times a minute for as long
+        as the screen is on -- pinning several gigabytes of weights and
+        keeping the GPU busy indefinitely.
+        """
+        import nova.services.system as module
+
+        calls = 0
+
+        async def counts(request: ChatRequest) -> ChatCompletion:
+            nonlocal calls
+            calls += 1
+            return ChatCompletion(text="ok", model="qwen3.8:latest")
+
+        module._probe_cache = None
+        service = self._service_for(settings, session, _Provider(counts))
+        try:
+            first = await service._ai_status()
+            for _ in range(9):
+                await service._ai_status()
+        finally:
+            module._probe_cache = None
+
+        assert calls == 1
+        assert first.online is True
+
+    async def test_a_model_that_is_down_is_not_re_probed_every_poll_either(
+        self, settings: Settings, session: AsyncSession
+    ) -> None:
+        """A failing Ollama is exactly when you least want a completion
+        request every fifteen seconds."""
+        import nova.services.system as module
+
+        calls = 0
+
+        async def refuses(request: ChatRequest) -> ChatCompletion:
+            nonlocal calls
+            calls += 1
+            raise AIProviderError("Ollama is not running.", code="ai_local_model_unreachable")
+
+        module._probe_cache = None
+        service = self._service_for(settings, session, _Provider(refuses))
+        try:
+            first = await service._ai_status()
+            await service._ai_status()
+        finally:
+            module._probe_cache = None
+
+        assert calls == 1
+        assert first.online is False
+
+    async def test_a_stale_reading_is_discarded(
+        self, settings: Settings, session: AsyncSession
+    ) -> None:
+        """Bounded staleness, not a permanent answer: a model that comes back
+        has to be noticed."""
+        import nova.services.system as module
+
+        calls = 0
+
+        async def counts(request: ChatRequest) -> ChatCompletion:
+            nonlocal calls
+            calls += 1
+            return ChatCompletion(text="ok", model="qwen3.8:latest")
+
+        module._probe_cache = None
+        service = self._service_for(settings, session, _Provider(counts))
+        try:
+            await service._ai_status()
+            # Age the cached entry past its window rather than sleeping
+            # through it.
+            probed_at, cached = module._probe_cache
+            module._probe_cache = (probed_at - module._PROBE_CACHE_SECONDS - 1, cached)
+            await service._ai_status()
+        finally:
+            module._probe_cache = None
+
+        assert calls == 2
+
+    async def test_the_offline_provider_is_never_probed_or_cached(
+        self, settings: Settings, session: AsyncSession
+    ) -> None:
+        """It answers from a table. Asking it anything is pure cost."""
+        import nova.services.system as module
+
+        class Offline(_Provider):
+            name = "offline"
+
+        async def unused(request: ChatRequest) -> ChatCompletion:  # pragma: no cover
+            raise AssertionError("the offline provider is not probed")
+
+        module._probe_cache = None
+        await self._service_for(settings, session, Offline(unused))._ai_status()
+
+        assert module._probe_cache is None
 
     async def test_a_model_that_does_not_answer_in_time_is_reported_as_offline(
         self, settings: Settings, session: AsyncSession

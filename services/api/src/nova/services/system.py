@@ -58,6 +58,37 @@ RECENT_ACTIVITY = 8
 _PROBE_TIMEOUT_SECONDS = 6.0
 _PROBE_PROMPT = "Reply with the single word: ok"
 
+# How long a probe result stands before the model is asked again.
+#
+# The dashboard polls every fifteen seconds, and the probe is a real
+# completion -- so without this a phone sitting in a desk stand asks a local
+# model to generate something four times a minute, for as long as the screen
+# is on. That pins the weights in memory and keeps the GPU busy indefinitely,
+# which on a laptop is the difference between idle and audible.
+#
+# "Is the model answering" is not a question whose answer changes every
+# fifteen seconds. A minute of staleness costs a slightly late recovery
+# notice; the alternative costs the machine.
+_PROBE_CACHE_SECONDS = 60.0
+
+# Process-wide rather than per-instance: SystemStatusService is constructed
+# per request, so an attribute would be empty every time and cache nothing.
+_probe_cache: tuple[float, AIStatus] | None = None
+
+
+def _remember(status: AIStatus, *, at: float) -> AIStatus:
+    """Cache a probe result, failures included.
+
+    A model that is down is re-probed on the same schedule as one that is up:
+    the point is to bound how often the provider is asked anything at all,
+    and a failing Ollama is exactly when you least want a completion request
+    every fifteen seconds.
+    """
+    global _probe_cache
+
+    _probe_cache = (at, status)
+    return status
+
 
 class SystemStatusService:
     """Builds the one response the home screen renders."""
@@ -141,9 +172,19 @@ class SystemStatusService:
             supports_tools=self._provider.supports_tools,
         )
         if self._provider.name == "offline":
+            # Nothing to probe: it answers from a table, and asking costs
+            # nothing to skip.
             return base.model_copy(update={"detail": "No model is configured; replies are canned."})
 
-        started = asyncio.get_running_loop().time()
+        global _probe_cache
+
+        now = asyncio.get_running_loop().time()
+        if _probe_cache is not None:
+            probed_at, cached = _probe_cache
+            if now - probed_at < _PROBE_CACHE_SECONDS and cached.model == base.model:
+                return cached
+
+        started = now
         try:
             await asyncio.wait_for(
                 self._provider.complete(
@@ -156,22 +197,30 @@ class SystemStatusService:
                 timeout=_PROBE_TIMEOUT_SECONDS,
             )
         except TimeoutError:
-            return base.model_copy(
-                update={
-                    "online": False,
-                    "detail": f"The model did not answer within {_PROBE_TIMEOUT_SECONDS:g}s.",
-                }
+            return _remember(
+                base.model_copy(
+                    update={
+                        "online": False,
+                        "detail": f"The model did not answer within {_PROBE_TIMEOUT_SECONDS:g}s.",
+                    }
+                ),
+                at=started,
             )
         except AIProviderError as exc:
-            return base.model_copy(update={"online": False, "detail": exc.message})
+            return _remember(
+                base.model_copy(update={"online": False, "detail": exc.message}), at=started
+            )
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("ai_probe_failed", error=type(exc).__name__)
-            return base.model_copy(
-                update={"online": False, "detail": "The model provider failed unexpectedly."}
+            return _remember(
+                base.model_copy(
+                    update={"online": False, "detail": "The model provider failed unexpectedly."}
+                ),
+                at=started,
             )
 
         elapsed = (asyncio.get_running_loop().time() - started) * 1000
-        return base.model_copy(update={"latency_ms": round(elapsed, 1)})
+        return _remember(base.model_copy(update={"latency_ms": round(elapsed, 1)}), at=started)
 
     async def _host_status(self) -> HostStatus:
         """This machine, read through the system tools' own helpers.
