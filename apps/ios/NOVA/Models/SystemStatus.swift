@@ -85,6 +85,14 @@ struct ProjectStatus: Decodable, Equatable, Sendable, Identifiable {
 struct MemoryStatus: Decodable, Equatable, Sendable {
     let total: Int
     let recent: [String]
+    /// Which embedder writes memories now.
+    let embeddingProvider: String?
+    /// Memories written by a different embedder, which retrieval cannot
+    /// see until the server's re-embedding pass has run. Absent on older
+    /// servers.
+    let stale: Int?
+
+    var needsReembedding: Bool { (stale ?? 0) > 0 }
 }
 
 struct ToolsStatus: Decodable, Equatable, Sendable {

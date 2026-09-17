@@ -25,6 +25,7 @@ built, but the reasoning disappears unless it is written down.
 | [017](017-tool-system-and-permissions.md) | A permissioned tool system, and confirmation as the boundary | Accepted |
 | [018](018-treating-tool-output-as-hostile.md) | Treating tool output as hostile input | Accepted |
 | [019](019-iphone-terminal.md) | The phone is the terminal, and the robot is gone | Accepted |
+| [020](020-embedding-width-is-a-ceiling.md) | The embedding column is a ceiling, and a switch is a re-embedding pass | Accepted |
 
 Format: Context, Decision, Alternatives considered, Consequences.
 

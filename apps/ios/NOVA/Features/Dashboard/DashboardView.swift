@@ -243,6 +243,19 @@ private struct MemoryCard: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+
+                if memory.needsReembedding, let stale = memory.stale {
+                    // The embedder changed and these rows are in the old
+                    // space: invisible to recall, not wrongly recalled. Only
+                    // the server can fix that, so say exactly how.
+                    Label {
+                        Text("\(stale) invisible to recall until `scripts/reembed_memories.py` runs on the server.")
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle")
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                }
             }
         }
     }

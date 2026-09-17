@@ -349,9 +349,24 @@ refuses to store anything credential-shaped even if the model tries.
 The default embedder is lexical: a hashed bag of word and character n-grams, so
 cosine similarity measures **shared vocabulary**. It genuinely retrieves and
 needs nothing installed. Its ceiling is real — it does not know "espresso"
-relates to "coffee" — and pointing it at a local embedding server is
-configuration plus a re-embedding pass. See
-[ADR 011](docs/decisions/011-lexical-embeddings-and-memory-extraction.md).
+relates to "coffee" — and the step up is a local embedding model through the
+same Ollama that runs the chat:
+
+```bash
+ollama pull nomic-embed-text
+# in .env: NOVA_AI__EMBEDDING_PROVIDER=openai_compatible
+#          NOVA_AI__EMBEDDING_MODEL=nomic-embed-text
+#          NOVA_AI__EMBEDDING_DIMENSIONS=768
+cd services/api && python scripts/reembed_memories.py
+```
+
+The last line matters. Vectors from two embedders are not comparable, so a
+switch leaves the old memories invisible to retrieval until they are
+re-embedded — invisible rather than wrongly ranked, and counted as stale on
+the dashboard until the pass runs. The pass is one transaction: a model
+server that dies halfway leaves the store exactly as it was. See
+[ADR 011](docs/decisions/011-lexical-embeddings-and-memory-extraction.md) and
+[ADR 020](docs/decisions/020-embedding-width-is-a-ceiling.md).
 
 ---
 
@@ -442,7 +457,6 @@ client that silently decodes the wrong thing.
 
 Deliberately not built yet, and each for a reason:
 
-- **A real embedder.** Lexical retrieval works and has a ceiling.
 - **Local Whisper.** The `SpeechRecogniser` protocol exists precisely so this
   is a new file rather than a refactor.
 - **Push notifications.** "Tell me when the deploy fails" needs a scheduler
