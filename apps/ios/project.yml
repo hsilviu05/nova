@@ -23,6 +23,15 @@ options:
     iOS: "18.0"
   createIntermediateGroups: true
 
+# Xcode compares this against its own version and offers "Update to
+# recommended settings" whenever it is older. XcodeGen's default is 1430
+# (Xcode 14.3), so the prompt appeared on every open -- and accepting it
+# writes into the .xcodeproj, which `xcodegen generate` then discards. The
+# five settings it actually wanted are in `settings.base` below; this records
+# that they have been applied.
+attributes:
+  LastUpgradeCheck: "2700"
+
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -31,6 +40,27 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     DEAD_CODE_STRIPPING: YES
+
+    # Xcode 27's recommended baseline, for the five settings XcodeGen does
+    # not already match. Compared against
+    # Templates/Project Templates/Base/Base_ProjectSettings.xctemplate rather
+    # than guessed at; the other 38 are already correct.
+    #
+    # Nothing here changes what is compiled today -- NOVA is pure Swift, so
+    # the C and C++ standards and the 64-to-32-bit warning apply to no source
+    # file in the target. They are set because they are the baseline a new
+    # project gets, and because the first C dependency that ever lands should
+    # arrive under them rather than under a 2014 default.
+    CLANG_CXX_LANGUAGE_STANDARD: "gnu++20"
+    GCC_C_LANGUAGE_STANDARD: gnu17
+    GCC_WARN_64_TO_32_BIT_CONVERSION: YES
+    # Generates typed Swift symbols for asset catalog entries, so a colour or
+    # an icon is `.accent` rather than a string literal. Inert until the app
+    # gains an asset catalog -- which it needs anyway, since it currently
+    # installs with a blank icon.
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+    # String catalogs rather than .strings files, if this is ever localised.
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
 
 targets:
   NOVA:
