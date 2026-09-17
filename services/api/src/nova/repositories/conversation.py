@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 
 from nova.models.conversation import Conversation, Message
 from nova.repositories.base import BaseRepository
@@ -35,6 +35,48 @@ class ConversationRepository(BaseRepository):
             .limit(limit)
         )
         return list((await self._session.execute(stmt)).scalars().all())
+
+    async def search_for_owner(
+        self, owner_id: uuid.UUID, query: str, *, limit: int = 50
+    ) -> list[tuple[Conversation, str | None]]:
+        """Conversations whose title or any message contains ``query``.
+
+        Each result carries the newest matching message's content, or None
+        when only the title matched, so the caller can show where the hit
+        was. Case-insensitive substring match: the wildcard characters in
+        the query are escaped, so searching for "100%" finds "100%" and not
+        everything.
+        """
+        pattern = "%" + _escape_like(query) + "%"
+
+        # The newest matching message per conversation, restricted to this
+        # owner's threads so the trigram scan never touches anyone else's.
+        matched = (
+            select(Message.conversation_id, Message.content)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(
+                Conversation.user_id == owner_id,
+                Message.content.ilike(pattern, escape="\\"),
+            )
+            .distinct(Message.conversation_id)
+            .order_by(Message.conversation_id, desc(Message.created_at))
+            .subquery()
+        )
+        stmt = (
+            select(Conversation, matched.c.content)
+            .outerjoin(matched, matched.c.conversation_id == Conversation.id)
+            .where(
+                Conversation.user_id == owner_id,
+                or_(
+                    Conversation.title.ilike(pattern, escape="\\"),
+                    matched.c.content.is_not(None),
+                ),
+            )
+            .order_by(desc(Conversation.last_message_at), desc(Conversation.created_at))
+            .limit(limit)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [(row[0], row[1]) for row in rows]
 
     def add(self, conversation: Conversation) -> Conversation:
         self._session.add(conversation)
@@ -67,3 +109,8 @@ class MessageRepository(BaseRepository):
     def add(self, message: Message) -> Message:
         self._session.add(message)
         return message
+
+
+def _escape_like(text: str) -> str:
+    """Make ``text`` match itself literally inside a LIKE pattern."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

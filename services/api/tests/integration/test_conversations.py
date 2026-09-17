@@ -388,3 +388,109 @@ class TestDetailCap:
         # The newest ones, still in reading order.
         assert detail["messages"][0]["content"] == "message 5"
         assert detail["messages"][-1]["content"] == f"message {total - 1}"
+
+
+class TestSearch:
+    async def _send(
+        self, client: AsyncClient, headers: dict[str, str], conversation: str, text: str
+    ) -> None:
+        response = await client.post(
+            f"/api/v1/conversations/{conversation}/messages",
+            headers=headers,
+            json={"content": text},
+        )
+        assert response.status_code == 201, response.text
+
+    async def test_finds_by_message_content_case_insensitively(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        hit = await _conversation(client, auth_headers)
+        miss = await _conversation(client, auth_headers)
+        await self._send(client, auth_headers, hit["id"], "Which database for the new project?")
+        await self._send(client, auth_headers, miss["id"], "What time is it?")
+
+        results = (
+            await client.get(
+                "/api/v1/conversations/search", headers=auth_headers, params={"q": "DATABASE"}
+            )
+        ).json()
+
+        assert [r["conversation"]["id"] for r in results] == [hit["id"]]
+        assert "database" in results[0]["snippet"].lower()
+
+    async def test_finds_by_title_with_no_snippet(
+        self, client: AsyncClient, auth_headers: dict[str, str], session: AsyncSession
+    ) -> None:
+        conversation = await _conversation(client, auth_headers)
+        thread = await session.get(Conversation, uuid.UUID(conversation["id"]))
+        assert thread is not None
+        thread.title = "Deploy checklist"
+        await session.commit()
+
+        results = (
+            await client.get(
+                "/api/v1/conversations/search", headers=auth_headers, params={"q": "checklist"}
+            )
+        ).json()
+
+        assert [r["conversation"]["id"] for r in results] == [conversation["id"]]
+        assert results[0]["snippet"] is None
+
+    async def test_matches_a_substring_not_a_whole_word(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        # Typing "postg" into a search box should find PostgreSQL before the
+        # word is finished; stemmed full-text search would not.
+        conversation = await _conversation(client, auth_headers)
+        await self._send(client, auth_headers, conversation["id"], "I prefer PostgreSQL.")
+
+        results = (
+            await client.get(
+                "/api/v1/conversations/search", headers=auth_headers, params={"q": "postg"}
+            )
+        ).json()
+
+        assert len(results) == 1
+
+    async def test_wildcards_in_the_query_are_literal(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        with_percent = await _conversation(client, auth_headers)
+        without = await _conversation(client, auth_headers)
+        await self._send(client, auth_headers, with_percent["id"], "Disk is at 100% again")
+        await self._send(client, auth_headers, without["id"], "Disk is at 100 percent")
+
+        results = (
+            await client.get(
+                "/api/v1/conversations/search", headers=auth_headers, params={"q": "100%"}
+            )
+        ).json()
+
+        assert [r["conversation"]["id"] for r in results] == [with_percent["id"]]
+
+    async def test_never_returns_another_users_thread(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        other_headers = await _second_user(client)
+        theirs = await _conversation(client, other_headers)
+        await self._send(client, other_headers, theirs["id"], "secret plans for the launch")
+
+        results = (
+            await client.get(
+                "/api/v1/conversations/search", headers=auth_headers, params={"q": "secret"}
+            )
+        ).json()
+
+        assert results == []
+
+    async def test_a_blank_query_is_rejected(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = await client.get(
+            "/api/v1/conversations/search", headers=auth_headers, params={"q": ""}
+        )
+        assert response.status_code == 422
+
+    async def test_requires_authentication(self, client: AsyncClient) -> None:
+        response = await client.get("/api/v1/conversations/search", params={"q": "x"})
+        assert response.status_code == 401

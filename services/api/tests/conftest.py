@@ -165,6 +165,7 @@ async def engine(settings: Settings) -> AsyncIterator[AsyncEngine]:
         # The migrations enable this; ``create_all`` does not, and the
         # memories table cannot be built without the vector type.
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     try:

@@ -19,7 +19,7 @@ from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
@@ -39,6 +39,7 @@ from nova.core.logging import get_logger
 from nova.schemas.conversation import (
     ConversationDetail,
     ConversationRead,
+    ConversationSearchResult,
     CreateConversationRequest,
     MessageExchange,
     SendMessageRequest,
@@ -80,6 +81,24 @@ async def list_conversations(
     current_user: CurrentUser, service: ServiceDep
 ) -> list[ConversationRead]:
     return await service.list_conversations(current_user.id)
+
+
+@router.get(
+    "/search",
+    response_model=list[ConversationSearchResult],
+    summary="Search conversations by title or content",
+)
+async def search_conversations(
+    current_user: CurrentUser,
+    service: ServiceDep,
+    q: Annotated[str, Query(min_length=1, max_length=200)],
+) -> list[ConversationSearchResult]:
+    """Case-insensitive substring match over titles and every message.
+
+    Declared before the ``/{conversation_id}`` route on purpose: FastAPI
+    matches in order, and "search" is not a UUID.
+    """
+    return await service.search_conversations(current_user.id, q.strip())
 
 
 @router.post(

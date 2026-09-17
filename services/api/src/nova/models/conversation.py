@@ -63,6 +63,13 @@ class Conversation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __table_args__ = (
         # The conversation list is always "mine, most recent first".
         Index("ix_conversations_user_id_last_message_at", "user_id", "last_message_at"),
+        # Substring search over titles; see the message index for why trigrams.
+        Index(
+            "ix_conversations_title_trgm",
+            "title",
+            postgresql_using="gin",
+            postgresql_ops={"title": "gin_trgm_ops"},
+        ),
         CheckConstraint("message_count >= 0", name="message_count_non_negative"),
     )
 
@@ -103,6 +110,15 @@ class Message(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __table_args__ = (
         # Replaying a conversation is always "this thread, oldest first".
         Index("ix_messages_conversation_id_created_at", "conversation_id", "created_at"),
+        # Searching history is a substring match ("postg" finds "PostgreSQL"),
+        # which is what a trigram index accelerates and a stemmed full-text
+        # index does not.
+        Index(
+            "ix_messages_content_trgm",
+            "content",
+            postgresql_using="gin",
+            postgresql_ops={"content": "gin_trgm_ops"},
+        ),
         CheckConstraint("role IN ('user', 'assistant')", name="role_known"),
         CheckConstraint("length(content) > 0", name="content_not_empty"),
     )

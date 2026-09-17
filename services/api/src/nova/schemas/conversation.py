@@ -48,6 +48,17 @@ class ConversationDetail(ConversationRead):
     messages: list[MessageRead] = Field(default_factory=list)
 
 
+class ConversationSearchResult(BaseModel):
+    """A conversation that matched a search, and where it matched."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    conversation: ConversationRead
+    # An excerpt of the newest message containing the query, or None when
+    # only the title matched.
+    snippet: str | None = None
+
+
 class CreateConversationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
