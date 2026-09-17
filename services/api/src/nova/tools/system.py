@@ -264,8 +264,14 @@ class RunningProcessesTool(_SystemTool):
 
 
 def load_average() -> tuple[float, float, float]:
+    # Windows has no load average, and no `os.getloadavg` to raise OSError
+    # either -- the attribute is simply absent, so catching OSError alone let
+    # an AttributeError out of here and turned /system/status into a 500.
+    getloadavg = getattr(os, "getloadavg", None)
+    if getloadavg is None:  # pragma: no cover - platform dependent
+        return (0.0, 0.0, 0.0)
     try:
-        return os.getloadavg()
+        return getloadavg()
     except OSError:  # pragma: no cover - not available on every platform
         return (0.0, 0.0, 0.0)
 

@@ -39,7 +39,37 @@ logger = get_logger(__name__)
 # What a child process is given. PATH so programs resolve, HOME because git
 # refuses to run without one, LANG so output is not locale-scrambled. Nothing
 # else: notably no NOVA_* variable, which is where every secret lives.
-_SAFE_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin"
+_POSIX_SAFE_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin"
+
+
+def _windows_safe_path() -> str:
+    """The Windows counterpart of the POSIX list above.
+
+    Same principle, not the operator's ``PATH``: a fixed set of standard
+    install locations, so what NOVA can spawn stays a property of this file
+    rather than of whatever happens to be on the machine's path. The layout
+    is read from ``SystemRoot``/``ProgramFiles`` rather than hardcoded,
+    because those move on localised and non-C: installations.
+    """
+    system_root = os.environ.get("SystemRoot", r"C:\Windows")
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    local_app_data = os.environ.get("LOCALAPPDATA")
+
+    directories = [
+        os.path.join(system_root, "System32"),
+        system_root,
+        # Git and Docker ship their CLIs here; these are the analogue of
+        # /opt/homebrew/bin above -- a known install location, named on
+        # purpose, not discovered.
+        os.path.join(program_files, "Git", "cmd"),
+        os.path.join(program_files, "Docker", "Docker", "resources", "bin"),
+    ]
+    if local_app_data:
+        directories.append(os.path.join(local_app_data, "Programs", "Git", "cmd"))
+    return os.pathsep.join(directories)
+
+
+_SAFE_PATH = _windows_safe_path() if os.name == "nt" else _POSIX_SAFE_PATH
 
 # Read in chunks so a command that produces gigabytes is cut off rather than
 # buffered. Comfortably larger than any tool's output cap.
@@ -74,17 +104,41 @@ def child_environment() -> dict[str, str]:
     whatever it has not heard of yet, and the point is that a child sees
     nothing it was not given deliberately.
     """
+    # Stops git from opening an editor, a pager, or a credential prompt in a
+    # process with no terminal, all of which hang until the timeout.
+    git = {
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_PAGER": "cat",
+        "PAGER": "cat",
+        "NO_COLOR": "1",
+    }
+
+    if os.name == "nt":
+        return {
+            "PATH": _SAFE_PATH,
+            # Windows resolves an argv[0] without an extension through
+            # PATHEXT; without it nothing here finds git.exe at all.
+            "PATHEXT": os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD"),
+            # The equivalent of HOME above: git reads USERPROFILE on Windows,
+            # and refuses to run without somewhere to look for its config.
+            "USERPROFILE": os.environ.get("USERPROFILE", ""),
+            # Not optional on Windows even though it looks like decoration:
+            # a child without SystemRoot cannot initialise Winsock, so
+            # anything that touches a socket dies on startup.
+            "SystemRoot": os.environ.get("SystemRoot", r"C:\Windows"),
+            **git,
+            # `cat` is not on the safe path here. Git skips the pager anyway
+            # when stdout is a pipe, which it always is in this module.
+            "GIT_PAGER": "",
+            "PAGER": "",
+        }
+
     return {
         "PATH": _SAFE_PATH,
         "HOME": os.environ.get("HOME", "/tmp"),  # noqa: S108 - a fallback, not a write target
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
-        # Stops git from opening an editor, a pager, or a credential prompt
-        # in a process with no terminal, all of which hang until the timeout.
-        "GIT_TERMINAL_PROMPT": "0",
-        "GIT_PAGER": "cat",
-        "PAGER": "cat",
-        "NO_COLOR": "1",
+        **git,
     }
 
 
@@ -252,7 +306,15 @@ async def _terminate(process: asyncio.subprocess.Process) -> None:
     # pragma: no cover on the suppression -- it fires when the process
     # exited between the check above and the signal, which is a race the
     # tests cannot schedule.
-    with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.killpg(os.getpgid(process.pid), 9)
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        if os.name == "nt":
+            # Windows has no process groups to signal, and `start_new_session`
+            # above is a POSIX-only argument that it quietly ignores. This
+            # kills the command but not grandchildren it spawned -- a real
+            # gap against the docstring, and the reason the shell tool stays
+            # the most dangerous thing to enable on this platform.
+            process.kill()
+        else:
+            os.killpg(os.getpgid(process.pid), 9)
     with contextlib.suppress(ProcessLookupError, TimeoutError):
         await asyncio.wait_for(process.wait(), timeout=2)
