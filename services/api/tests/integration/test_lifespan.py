@@ -101,6 +101,19 @@ class TestLifespan:
             assert app.state.tool_registry.has("memory_search")
             assert not app.state.tool_registry.has("git_status")
 
+    async def test_startup_completes_with_no_database_at_all(self, settings: Settings) -> None:
+        """The container is smoke-tested with nothing but the image, and
+        /health is a probe of the process, not of its dependencies. So
+        nothing startup does may require Postgres -- the stale-memory check
+        it makes is advisory and has to say "skipped" rather than fail."""
+        configured = settings.model_copy(deep=True)
+        configured.database = configured.database.model_copy(update={"port": 1})
+        app = create_app(configured)
+
+        async with app.router.lifespan_context(app):
+            assert app.state.engine is not None
+            assert app.state.embedding_provider.name == "lexical"
+
     async def test_everything_opened_is_closed_even_when_one_close_fails(
         self, settings: Settings, monkeypatch: pytest.MonkeyPatch
     ) -> None:

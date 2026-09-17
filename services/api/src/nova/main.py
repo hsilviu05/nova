@@ -82,16 +82,24 @@ def _build_lifespan(
 
         # A changed embedder leaves the previous rows invisible to
         # retrieval, which is the safe failure but a quiet one. Say so at
-        # the one moment an operator is looking: startup.
-        async with session_factory() as session:
-            stale = await MemoryRepository(session).count_stale(embedding_provider.name)
-        if stale:
-            logger.warning(
-                "memories_need_reembedding",
-                stale=stale,
-                embedding_provider=embedding_provider.name,
-                fix="python scripts/reembed_memories.py",
-            )
+        # the one moment an operator is looking: startup. It is the only
+        # thing startup asks the database, and it must stay advisory: the
+        # process has to come up with no database at all, because that is
+        # how the container is smoke-tested and how /health stays a probe of
+        # the process rather than of its dependencies.
+        try:
+            async with session_factory() as session:
+                stale = await MemoryRepository(session).count_stale(embedding_provider.name)
+        except Exception as exc:  # any failure here is advisory
+            logger.warning("stale_memory_check_skipped", reason=type(exc).__name__)
+        else:
+            if stale:
+                logger.warning(
+                    "memories_need_reembedding",
+                    stale=stale,
+                    embedding_provider=embedding_provider.name,
+                    fix="python scripts/reembed_memories.py",
+                )
 
         logger.info(
             "api_started",
