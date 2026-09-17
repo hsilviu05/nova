@@ -9,7 +9,7 @@ So the split is decided by one question: **which machine do you want NOVA to
 be able to tell you about?** The API belongs there. Only the model moves.
 
     ┌─────────────────────┐              ┌──────────────────────┐
-    │  Mac                │              │  Linux box + GPU     │
+    │  Mac                │              │  any box with a GPU  │
     │                     │   HTTP       │                      │
     │  NOVA API ──────────┼─────────────▶│  Ollama :11434       │
     │  Postgres, Redis    │  :11434      │                      │
@@ -40,8 +40,12 @@ not having. See SECURITY.md.
 
 ## On the GPU box
 
-Ollama binds `127.0.0.1` by default, which is the single thing that makes
-this not work. It has to listen on the network:
+One thing is true on every platform and is the single reason this does not
+work first time: **Ollama binds `127.0.0.1` by default.** Everything below is
+some variation of telling it not to, and then letting the traffic through a
+firewall.
+
+### Linux
 
     OLLAMA_HOST=0.0.0.0 ollama serve
 
@@ -93,6 +97,69 @@ survives. Two routes, both fine:
   On a Bazzite NVIDIA image the driver and toolkit are already present. On a
   non-NVIDIA image they are not, and no amount of container configuration
   will conjure them — check `nvidia-smi` first.
+
+### Windows
+
+The easiest of the three. Ollama ships a native installer, and a current
+GeForce driver is all the GPU support it needs — no container runtime, no
+toolkit, nothing to pass through.
+
+1. Install the NVIDIA driver, then check it took:
+
+       nvidia-smi
+
+   The table prints the GPU name and total VRAM. VRAM is what decides which
+   model you can run; system RAM is almost irrelevant once a GPU is in play.
+   Ollama needs compute capability 5.0 or newer, which means roughly a
+   GTX 900 series or later — `nvidia-smi` naming a card at all is a good
+   sign, but an old Quadro or a 700-series will not do.
+
+2. Install Ollama from ollama.com. It runs in the tray and starts at login.
+
+3. Make it listen on the network. In **Settings → System → About → Advanced
+   system settings → Environment Variables**, add a user variable:
+
+       OLLAMA_HOST = 0.0.0.0
+
+   Or from an elevated PowerShell:
+
+       setx OLLAMA_HOST "0.0.0.0" /M
+
+   Either way **quit Ollama from the tray and start it again** — it reads
+   the variable once, at launch, so a running instance keeps the old value
+   and you will think the setting did nothing.
+
+4. Let it through the firewall. This is the step that silently breaks
+   everything, because a blocked port looks exactly like a server that is
+   not running. From an elevated PowerShell:
+
+       New-NetFirewallRule -DisplayName "Ollama" -Direction Inbound `
+           -LocalPort 11434 -Protocol TCP -Action Allow -Profile Private
+
+   `-Profile Private` deliberately: your home network only. If Windows has
+   the network marked Public the rule will not apply, and the fix is to set
+   the network to Private rather than to widen the rule.
+
+5. If the laptop has a small system drive, put the weights elsewhere before
+   pulling anything — models are gigabytes each:
+
+       setx OLLAMA_MODELS "D:\ollama" /M
+
+6. Stop it sleeping. A laptop lid-closes into standby and takes the model
+   server with it, which is the same trap the Mac had. **Settings → System →
+   Power → Lid and button actions**, set closing the lid to do nothing while
+   plugged in, and screen/sleep to Never on AC.
+
+Then pull a model and confirm the GPU is actually being used:
+
+    ollama pull qwen2.5:7b
+    ollama show qwen2.5:7b
+    ollama run qwen2.5:7b hi
+    ollama ps
+
+`ollama ps` prints a PROCESSOR column. If it says CPU, the GPU is not being
+used and the model will be slow in a way no amount of configuration on the
+NOVA side will fix — go back to `nvidia-smi`.
 
 ## On the machine running NOVA
 
