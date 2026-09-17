@@ -13,6 +13,7 @@ from httpx import ASGITransport, AsyncClient
 from nova.ai.errors import AIConfigurationError
 from nova.ai.offline import OfflineEmbeddingProvider
 from nova.ai.openai_compatible import OpenAICompatibleEmbeddingProvider
+from nova.ai.padded import PaddedEmbeddingProvider
 from nova.ai.registry import EMBEDDING_DIMENSIONS, build_embedding_provider
 from nova.core.config import AISettings, Settings, get_settings
 from nova.main import create_app
@@ -64,17 +65,44 @@ class TestBuildingTheEmbeddingProvider:
 
         assert isinstance(provider, OpenAICompatibleEmbeddingProvider)
 
-    def test_a_width_that_does_not_match_the_column_is_refused_at_startup(self) -> None:
-        """Not at the first write.
+    def test_a_narrower_model_is_padded_up_to_the_column(self) -> None:
+        """nomic-embed-text is 768 wide; the column is 1536. Zero-padding
+        preserves every cosine distance, so the narrower model just works."""
+        provider = build_embedding_provider(
+            AISettings(embedding_provider="openai_compatible", embedding_dimensions=768)
+        )
 
-        Changing it needs a migration and a re-embedding pass, and the
-        failure has to say so before any vector is stored.
-        """
+        assert isinstance(provider, PaddedEmbeddingProvider)
+        assert provider.dimensions == EMBEDDING_DIMENSIONS
+        assert provider.native_dimensions == 768
+
+    def test_a_model_wider_than_the_column_is_refused_at_startup(self) -> None:
+        """Not at the first write. Truncation would destroy the geometry, so
+        the only honest answers are a migration or a narrower model."""
         with pytest.raises(AIConfigurationError) as caught:
-            build_embedding_provider(AISettings(embedding_dimensions=768))
+            build_embedding_provider(
+                AISettings(embedding_provider="openai_compatible", embedding_dimensions=4096)
+            )
 
         assert caught.value.code == "ai_embedding_dimension_mismatch"
         assert "migration" in str(caught.value)
+
+    def test_the_width_setting_does_not_touch_the_built_in_embedders(self) -> None:
+        """It describes the external model. Lexical vectors already stored
+        under the name "lexical" must stay comparable with new ones."""
+        provider = build_embedding_provider(AISettings(embedding_dimensions=768))
+
+        assert provider.name == "lexical"
+        assert provider.dimensions == EMBEDDING_DIMENSIONS
+
+    def test_the_provider_name_carries_the_model(self) -> None:
+        """Two models behind one endpoint produce incomparable vectors, and
+        the name on each memory row is what keeps them apart."""
+        provider = build_embedding_provider(
+            AISettings(embedding_provider="openai_compatible", embedding_model="nomic-embed-text")
+        )
+
+        assert provider.name == "openai_compatible:nomic-embed-text"
 
 
 class TestSettingsAreCached:

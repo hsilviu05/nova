@@ -587,7 +587,10 @@ class TestEmbeddings:
 
     async def test_identity(self) -> None:
         embedder = self.embedder(Server(), dimensions=1536)
-        assert embedder.name == "openai_compatible"
+        # The model is part of the name: two models behind one endpoint are
+        # two incomparable spaces, and the name on each memory row is what
+        # keeps them apart.
+        assert embedder.name == f"openai_compatible:{embedder._model}"
         assert embedder.dimensions == 1536
 
     async def test_a_key_is_sent_when_configured(self) -> None:

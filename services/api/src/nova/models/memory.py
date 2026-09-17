@@ -35,8 +35,9 @@ if TYPE_CHECKING:
     from nova.models.user import User
 
 # The vector width is baked into the column, so this is schema, not
-# configuration. Changing it needs a migration *and* re-embedding every
-# existing row -- vectors of different widths cannot be compared at all.
+# configuration. It is a ceiling: a narrower model's vectors are zero-padded
+# to it, which preserves every cosine distance (nova.ai.padded). Raising it
+# needs a migration; a model wider than it is refused at startup.
 EMBEDDING_DIMENSIONS = 1536
 
 # A small, closed taxonomy. Deliberately not open-ended: a category set that
@@ -79,7 +80,8 @@ class Memory(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # Which provider produced the vector. Vectors from different embedders
     # are not comparable, so a provider change has to be *detectable* rather
     # than silently degrading every future search.
-    embedding_provider: Mapped[str] = mapped_column(String(32), nullable=False, default="lexical")
+    # Wide enough for "openai_compatible:" plus a model name.
+    embedding_provider: Mapped[str] = mapped_column(String(96), nullable=False, default="lexical")
 
     # Where this came from, so the owner can see why NOVA believes it.
     # SET NULL rather than CASCADE: deleting a conversation should not erase

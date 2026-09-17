@@ -21,7 +21,7 @@ import shutil
 import uuid
 from datetime import timedelta
 
-from nova.ai.base import ChatMessage, ChatProvider, ChatRequest
+from nova.ai.base import ChatMessage, ChatProvider, ChatRequest, EmbeddingProvider
 from nova.ai.errors import AIProviderError
 from nova.core.clock import utc_now
 from nova.core.config import IntegrationSettings, Settings
@@ -68,6 +68,7 @@ class SystemStatusService:
         registry: ToolRegistry,
         memories: MemoryRepository,
         invocations: ToolInvocationRepository,
+        embeddings: EmbeddingProvider,
     ) -> None:
         self._settings = settings
         self._provider = provider
@@ -75,6 +76,7 @@ class SystemStatusService:
         self._registry = registry
         self._memories = memories
         self._invocations = invocations
+        self._embeddings = embeddings
 
     async def overview(self, owner_id: uuid.UUID) -> SystemStatus:
         """Everything at once, gathered concurrently.
@@ -238,4 +240,10 @@ class SystemStatusService:
     async def _memory_status(self, owner_id: uuid.UUID) -> MemoryStatus:
         total = await self._memories.count_for_owner(owner_id)
         recent = await self._memories.list_recent(owner_id, limit=RECENT_MEMORIES)
-        return MemoryStatus(total=total, recent=[memory.content for memory in recent])
+        stale = await self._memories.count_stale(self._embeddings.name, owner_id=owner_id)
+        return MemoryStatus(
+            total=total,
+            recent=[memory.content for memory in recent],
+            embedding_provider=self._embeddings.name,
+            stale=stale,
+        )

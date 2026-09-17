@@ -200,14 +200,15 @@ class TestRegistry:
         assert provider.name == "offline"
 
     def test_rejects_a_width_the_column_cannot_hold(self) -> None:
-        """A mismatch has to fail at startup, not on the first insert.
-
-        Vectors of different widths cannot be compared at all, so a silent
-        acceptance here would mean every future search returning nothing --
-        or an error from Postgres per request, which is worse.
+        """A model wider than the column has to fail at startup, not on the
+        first insert. Narrower is fine -- zero-padding keeps every cosine
+        distance exact -- but wider could only be truncated, and truncation
+        destroys the geometry retrieval depends on.
         """
         with pytest.raises(AIConfigurationError) as caught:
-            build_embedding_provider(AISettings(embedding_dimensions=512))
+            build_embedding_provider(
+                AISettings(embedding_provider="openai_compatible", embedding_dimensions=2048)
+            )
 
         assert caught.value.code == "ai_embedding_dimension_mismatch"
 

@@ -150,12 +150,16 @@ class TestVectorSearch:
 
         # With the cut-off in place only the relevant one survives, which is
         # the behaviour that matters.
-        matches = await repository.search(user.id, query, limit=3, max_distance=0.85)
+        matches = await repository.search(
+            user.id, query, limit=3, max_distance=0.85, provider=embedder.name
+        )
         assert [m.memory.content for m in matches] == ["Drinks coffee every morning"]
 
         # Without it, all three come back -- and the ordering has to be right,
         # or the cut-off would be doing the retrieval on its own.
-        ranked = await repository.search(user.id, query, limit=3, max_distance=2.0)
+        ranked = await repository.search(
+            user.id, query, limit=3, max_distance=2.0, provider=embedder.name
+        )
         assert len(ranked) == 3
         assert "coffee" in ranked[0].memory.content
         assert ranked[0].similarity > ranked[1].similarity >= ranked[2].similarity
@@ -173,7 +177,12 @@ class TestVectorSearch:
         await _store(repository, embedder, user.id, "Deploys the staging cluster on Fridays")
 
         query = (await embedder.embed(["What sort of cheese do I like?"]))[0]
-        assert await repository.search(user.id, query, limit=5, max_distance=0.85) == []
+        assert (
+            await repository.search(
+                user.id, query, limit=5, max_distance=0.85, provider=embedder.name
+            )
+            == []
+        )
 
     async def test_one_persons_memories_never_reach_another(
         self, session: Any, embedder: LexicalEmbeddingProvider
@@ -194,8 +203,15 @@ class TestVectorSearch:
 
         query = (await embedder.embed(["Do I drink coffee every morning?"]))[0]
 
-        assert await repository.search(owner.id, query, limit=5, max_distance=0.85)
-        assert await repository.search(stranger.id, query, limit=5, max_distance=0.85) == []
+        assert await repository.search(
+            owner.id, query, limit=5, max_distance=0.85, provider=embedder.name
+        )
+        assert (
+            await repository.search(
+                stranger.id, query, limit=5, max_distance=0.85, provider=embedder.name
+            )
+            == []
+        )
 
     async def test_a_zero_limit_makes_no_query(
         self, session: Any, embedder: LexicalEmbeddingProvider
@@ -204,7 +220,12 @@ class TestVectorSearch:
         repository = MemoryRepository(session)
         query = (await embedder.embed(["anything"]))[0]
 
-        assert await repository.search(user.id, query, limit=0, max_distance=1.0) == []
+        assert (
+            await repository.search(
+                user.id, query, limit=0, max_distance=1.0, provider=embedder.name
+            )
+            == []
+        )
 
     async def test_recording_no_recalls_is_a_no_op(self, session: Any) -> None:
         # A search that matched nothing still calls this; it must not issue
@@ -236,7 +257,9 @@ class TestDeduplication:
 
         again = (await embedder.embed(["Drinks coffee every morning"]))[0]
         assert (
-            await repository.find_similar(user.id, again, threshold=DEDUPLICATION_DISTANCE)
+            await repository.find_similar(
+                user.id, again, threshold=DEDUPLICATION_DISTANCE, provider=embedder.name
+            )
             is not None
         )
 
@@ -249,7 +272,10 @@ class TestDeduplication:
 
         other = (await embedder.embed(["Has a cat called Pepper"]))[0]
         assert (
-            await repository.find_similar(user.id, other, threshold=DEDUPLICATION_DISTANCE) is None
+            await repository.find_similar(
+                user.id, other, threshold=DEDUPLICATION_DISTANCE, provider=embedder.name
+            )
+            is None
         )
 
 
@@ -747,3 +773,150 @@ class TestSettingsGuard:
         ai = AISettings()
         assert 0 < ai.memory_retrieval_limit <= 20
         assert 0 < ai.memory_max_distance <= 1.0
+
+
+class TestProviderIsolation:
+    """Vectors from two embedders live in different spaces. A distance
+    between them is a number with no meaning, so rows from another embedder
+    are left out of retrieval and counted as stale instead."""
+
+    async def test_a_memory_from_another_embedder_is_not_retrieved(
+        self, session: Any, embedder: LexicalEmbeddingProvider
+    ) -> None:
+        user = await _make_user(session)
+        repository = MemoryRepository(session)
+        stale = await _store(repository, embedder, user.id, "Drinks coffee every morning")
+        stale.embedding_provider = "openai_compatible:some-old-model"
+        await session.flush()
+        query = (await embedder.embed(["coffee in the morning"]))[0]
+
+        matches = await repository.search(
+            user.id, query, limit=5, max_distance=2.0, provider=embedder.name
+        )
+
+        assert matches == []
+        assert await repository.count_stale(embedder.name, owner_id=user.id) == 1
+        assert await repository.count_stale("openai_compatible:some-old-model") == 0
+
+    async def test_the_dashboard_counts_stale_memories_for_the_caller(
+        self, client: AsyncClient, auth_headers: dict[str, str], session: Any
+    ) -> None:
+        me = (await client.get("/api/v1/users/me", headers=auth_headers)).json()
+        embedder = LexicalEmbeddingProvider(dimensions=1536)
+        repository = MemoryRepository(session)
+        fresh = await _store(repository, embedder, uuid.UUID(me["id"]), "Prefers PostgreSQL")
+        stale = await _store(repository, embedder, uuid.UUID(me["id"]), "Has a cat called Pepper")
+        stale.embedding_provider = "openai_compatible:some-old-model"
+        await session.commit()
+
+        memory = (await client.get("/api/v1/system/status", headers=auth_headers)).json()["memory"]
+
+        assert memory["total"] == 2
+        assert memory["stale"] == 1
+        assert memory["embedding_provider"] == embedder.name
+        assert fresh.id != stale.id
+
+
+class TestReembedding:
+    async def test_rewrites_every_stale_row_in_the_new_space(
+        self, session_factory: Any, embedder: LexicalEmbeddingProvider
+    ) -> None:
+        from nova.ai.offline import OfflineEmbeddingProvider
+        from nova.services.reembed import reembed_all
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            repository = MemoryRepository(session)
+            memories = [
+                await _store(repository, embedder, user.id, f"Fact number {i}") for i in range(5)
+            ]
+            ids = [m.id for m in memories]
+            await session.commit()
+
+        new = OfflineEmbeddingProvider(dimensions=1536)
+        seen: list[tuple[int, int]] = []
+        report = await reembed_all(
+            session_factory,
+            new,
+            batch_size=2,
+            progress=lambda done, total: seen.append((done, total)),
+        )
+
+        assert report.provider == new.name
+        assert report.before[embedder.name] == 5
+        assert report.reembedded == 5 and report.stale_before == 5
+        assert seen == [(2, 5), (4, 5), (5, 5)]
+        async with session_factory() as session:
+            rows = (await session.execute(select(Memory).where(Memory.id.in_(ids)))).scalars().all()
+            assert {row.embedding_provider for row in rows} == {new.name}
+            expected = await new.embed([row.content for row in rows])
+            for row, vector in zip(rows, expected, strict=True):
+                assert list(row.embedding) == pytest.approx(vector)
+            assert await MemoryRepository(session).count_stale(new.name) == 0
+
+    async def test_a_dry_run_changes_nothing(
+        self, session_factory: Any, embedder: LexicalEmbeddingProvider
+    ) -> None:
+        from nova.ai.offline import OfflineEmbeddingProvider
+        from nova.services.reembed import reembed_all
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            await _store(MemoryRepository(session), embedder, user.id, "Drinks coffee")
+            await session.commit()
+
+        report = await reembed_all(
+            session_factory, OfflineEmbeddingProvider(dimensions=1536), dry_run=True
+        )
+
+        assert report.reembedded == 1 and report.dry_run
+        async with session_factory() as session:
+            assert await MemoryRepository(session).count_stale(embedder.name) == 0
+
+    async def test_an_embedder_that_fails_midway_leaves_the_store_untouched(
+        self, session_factory: Any, embedder: LexicalEmbeddingProvider
+    ) -> None:
+        """All or nothing. A store half in each space is the one outcome
+        that must be impossible."""
+        from nova.ai.offline import OfflineEmbeddingProvider
+        from nova.services.reembed import reembed_all
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            repository = MemoryRepository(session)
+            for i in range(4):
+                await _store(repository, embedder, user.id, f"Fact number {i}")
+            await session.commit()
+
+        class DiesOnSecondBatch(OfflineEmbeddingProvider):
+            calls = 0
+
+            async def embed(self, texts: list[str]) -> list[list[float]]:
+                self.calls += 1
+                if self.calls == 3:  # the probe, one batch, then the failure
+                    raise RuntimeError("model server went away")
+                return await super().embed(texts)
+
+        with pytest.raises(RuntimeError):
+            await reembed_all(session_factory, DiesOnSecondBatch(dimensions=1536), batch_size=2)
+
+        async with session_factory() as session:
+            assert await MemoryRepository(session).count_stale(embedder.name) == 0
+
+    async def test_an_unreachable_embedder_is_refused_before_any_row_is_read(
+        self, session_factory: Any
+    ) -> None:
+        from nova.services.reembed import reembed_all
+
+        class Unreachable:
+            name = "openai_compatible:down"
+            dimensions = 1536
+
+            async def embed(self, texts: list[str]) -> list[list[float]]:
+                raise ConnectionError("refused")
+
+            async def aclose(self) -> None:
+                return None
+
+        with pytest.raises(ConnectionError):
+            await reembed_all(session_factory, Unreachable())

@@ -17,6 +17,7 @@ from nova.ai.openai_compatible import (
     OpenAICompatibleChatProvider,
     OpenAICompatibleEmbeddingProvider,
 )
+from nova.ai.padded import fit
 from nova.core.config import AISettings
 from nova.core.logging import get_logger
 from nova.models.memory import EMBEDDING_DIMENSIONS
@@ -104,22 +105,32 @@ def build_embedding_provider(settings: AISettings) -> EmbeddingProvider:
     shared vocabulary rather than meaning, which is a real ceiling but not a
     pretence.
 
-    Pointing this at a local embedding server is a configuration change plus
-    a re-embedding pass, and only works for a model whose width matches the
-    memories column. That is a real constraint, stated rather than papered
-    over by padding or truncating vectors, which would silently destroy the
-    geometry retrieval depends on.
+    The memories column is a *ceiling* on width, not an exact requirement. A
+    model narrower than it (nomic-embed-text is 768 wide, mxbai-embed-large
+    1024) has its vectors zero-padded, which leaves every cosine distance
+    exactly as the model produced it -- see :mod:`nova.ai.padded`. A model
+    wider than the column is refused: truncation would destroy the geometry.
+
+    ``embedding_dimensions`` describes the external model only. The lexical
+    and hash providers always fill the column, so their vectors stay
+    comparable with the ones already stored under the same name.
+
+    Switching models is a configuration change plus a re-embedding pass
+    (``scripts/reembed_memories.py``). Until that pass runs, memories
+    written by the previous embedder are invisible to retrieval rather than
+    wrongly compared -- the provider name on each row is what keeps the two
+    apart, and it carries the model name for that reason.
 
     Raises:
-        AIConfigurationError: if the configured width disagrees with the
-            database column. Vectors of different widths cannot be compared,
-            so this has to fail loudly at startup rather than on first insert.
+        AIConfigurationError: if the configured width is wider than the
+            column. That has to fail at startup rather than on first insert.
     """
-    if settings.embedding_dimensions != EMBEDDING_DIMENSIONS:
+    if settings.embedding_dimensions > EMBEDDING_DIMENSIONS:
         raise AIConfigurationError(
-            f"Embedding width {settings.embedding_dimensions} does not match the "
-            f"memories column ({EMBEDDING_DIMENSIONS}). Changing it needs a "
-            "migration and a re-embedding pass.",
+            f"Embedding width {settings.embedding_dimensions} is wider than the memories "
+            f"column ({EMBEDDING_DIMENSIONS}). Truncating vectors would destroy the geometry "
+            "retrieval depends on; widening the column needs a migration and a "
+            "re-embedding pass.",
             code="ai_embedding_dimension_mismatch",
         )
 
@@ -128,12 +139,15 @@ def build_embedding_provider(settings: AISettings) -> EmbeddingProvider:
             return OfflineEmbeddingProvider(dimensions=EMBEDDING_DIMENSIONS)
         case "openai_compatible":
             key = settings.openai_api_key
-            return OpenAICompatibleEmbeddingProvider(
-                base_url=settings.openai_base_url,
-                model=settings.embedding_model,
-                dimensions=EMBEDDING_DIMENSIONS,
-                api_key=key.get_secret_value() if key else None,
-                timeout_seconds=settings.request_timeout_seconds,
+            return fit(
+                OpenAICompatibleEmbeddingProvider(
+                    base_url=settings.openai_base_url,
+                    model=settings.embedding_model,
+                    dimensions=settings.embedding_dimensions,
+                    api_key=key.get_secret_value() if key else None,
+                    timeout_seconds=settings.request_timeout_seconds,
+                ),
+                width=EMBEDDING_DIMENSIONS,
             )
         case _:
             return LexicalEmbeddingProvider(dimensions=EMBEDDING_DIMENSIONS)

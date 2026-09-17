@@ -231,6 +231,7 @@ def get_system_status_service(
     registry: Annotated[ToolRegistry, Depends(get_tool_registry)],
     memories: Annotated[MemoryRepository, Depends(get_memory_repository)],
     invocations: Annotated[ToolInvocationRepository, Depends(get_tool_invocation_repository)],
+    embeddings: Annotated[EmbeddingProvider, Depends(get_embedding_provider)],
 ) -> SystemStatusService:
     settings: Settings = request.app.state.settings
     return SystemStatusService(
@@ -240,6 +241,7 @@ def get_system_status_service(
         registry=registry,
         memories=memories,
         invocations=invocations,
+        embeddings=embeddings,
     )
 
 

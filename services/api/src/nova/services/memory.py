@@ -186,6 +186,7 @@ class MemoryService:
             embedding,
             limit=limit,
             max_distance=self._settings.memory_max_distance,
+            provider=self._embeddings.name,
         )
 
         if matches:
@@ -211,6 +212,10 @@ class MemoryService:
             owner_id, category=category, limit=limit, offset=offset
         )
         return [MemoryRead.model_validate(row) for row in rows]
+
+    async def stale_count(self, owner_id: uuid.UUID) -> int:
+        """Memories this owner has that the current embedder cannot see."""
+        return await self._memories.count_stale(self._embeddings.name, owner_id=owner_id)
 
     async def count(self, owner_id: uuid.UUID, *, category: str | None = None) -> int:
         return await self._memories.count_for_owner(owner_id, category=category)
@@ -340,7 +345,10 @@ class MemoryRecorder:
 
             for candidate, embedding in zip(candidates, vectors, strict=True):
                 existing = await repository.find_similar(
-                    owner_id, embedding, threshold=DEDUPLICATION_DISTANCE
+                    owner_id,
+                    embedding,
+                    threshold=DEDUPLICATION_DISTANCE,
+                    provider=self._embeddings.name,
                 )
                 if existing is not None:
                     # Hearing something again is evidence for it, so the

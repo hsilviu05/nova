@@ -63,6 +63,14 @@ class MemoryStatus(BaseModel):
     recent: list[str] = Field(
         default_factory=list, description="The most recently learned, newest first."
     )
+    embedding_provider: str = Field(description="What embeds memories now.")
+    stale: int = Field(
+        default=0,
+        description=(
+            "Memories embedded by a different provider. Retrieval cannot see them until "
+            "scripts/reembed_memories.py has run."
+        ),
+    )
 
 
 class ActivityEntry(BaseModel):

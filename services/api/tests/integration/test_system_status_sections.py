@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from nova.ai.base import ChatCompletion, ChatRequest, StreamCompleted, StreamEvent
 from nova.ai.errors import AIProviderError
+from nova.ai.registry import build_embedding_provider
 from nova.core.config import IntegrationSettings, ProjectTarget, Settings, ToolSettings
 from nova.repositories.memory import MemoryRepository
 from nova.repositories.tool_invocation import ToolInvocationRepository
@@ -74,6 +75,7 @@ def service(
         registry=registry or ToolRegistry(),
         memories=MemoryRepository(session),
         invocations=ToolInvocationRepository(session),
+        embeddings=build_embedding_provider(settings.ai),
     )
 
 

@@ -92,8 +92,14 @@ class MemoryRepository(BaseRepository):
         *,
         limit: int,
         max_distance: float,
+        provider: str,
     ) -> list[ScoredMemory]:
         """Nearest memories to ``embedding``, owned by ``owner_id``.
+
+        Only rows embedded by ``provider`` are compared. A vector from
+        another embedder lives in a different space, and a distance to it
+        is a number with no meaning -- so those rows are left out rather
+        than ranked wrongly, and counted as stale until re-embedded.
 
         The owner filter is in the WHERE clause, so one account's memories
         can never surface in another's context. That is a correctness
@@ -111,7 +117,11 @@ class MemoryRepository(BaseRepository):
         distance = Memory.embedding.cosine_distance(embedding).label("distance")
         stmt = (
             select(Memory, distance)
-            .where(Memory.user_id == owner_id, distance <= max_distance)
+            .where(
+                Memory.user_id == owner_id,
+                Memory.embedding_provider == provider,
+                distance <= max_distance,
+            )
             .order_by(distance)
             .limit(limit)
         )
@@ -120,7 +130,7 @@ class MemoryRepository(BaseRepository):
         return [ScoredMemory(memory=row[0], distance=float(row[1])) for row in rows]
 
     async def find_similar(
-        self, owner_id: uuid.UUID, embedding: list[float], *, threshold: float
+        self, owner_id: uuid.UUID, embedding: list[float], *, threshold: float, provider: str
     ) -> Memory | None:
         """The nearest memory, if it is near enough to be the same thing.
 
@@ -128,8 +138,37 @@ class MemoryRepository(BaseRepository):
         every time it comes up -- without it, "drinks coffee" accumulates a
         dozen near-duplicates that crowd out everything else at retrieval.
         """
-        matches = await self.search(owner_id, embedding, limit=1, max_distance=threshold)
+        matches = await self.search(
+            owner_id, embedding, limit=1, max_distance=threshold, provider=provider
+        )
         return matches[0].memory if matches else None
+
+    async def count_stale(self, provider: str, *, owner_id: uuid.UUID | None = None) -> int:
+        """Memories embedded by something other than ``provider``."""
+        stmt = select(func.count()).select_from(Memory).where(Memory.embedding_provider != provider)
+        if owner_id is not None:
+            stmt = stmt.where(Memory.user_id == owner_id)
+        return int((await self._session.execute(stmt)).scalar_one())
+
+    async def count_by_provider(self) -> dict[str, int]:
+        """How many memories each embedder wrote, across every owner."""
+        stmt = select(Memory.embedding_provider, func.count()).group_by(Memory.embedding_provider)
+        return {str(row[0]): int(row[1]) for row in (await self._session.execute(stmt)).all()}
+
+    async def list_stale(
+        self, provider: str, *, after: uuid.UUID | None, limit: int
+    ) -> list[Memory]:
+        """A page of memories not embedded by ``provider``, by id.
+
+        Keyset rather than offset pagination, because the caller changes
+        each row's provider as it goes: an offset would skip every other
+        page as rows dropped out of the filter.
+        """
+        stmt = select(Memory).where(Memory.embedding_provider != provider)
+        if after is not None:
+            stmt = stmt.where(Memory.id > after)
+        stmt = stmt.order_by(Memory.id).limit(limit)
+        return list((await self._session.execute(stmt)).scalars().all())
 
     def add(self, memory: Memory) -> Memory:
         self._session.add(memory)

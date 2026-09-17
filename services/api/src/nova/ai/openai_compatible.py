@@ -281,7 +281,10 @@ class OpenAICompatibleEmbeddingProvider:
 
     @property
     def name(self) -> str:
-        return "openai_compatible"
+        # The model is part of the identity: two models behind the same
+        # server produce incomparable vectors, and the provider name on each
+        # memory row is what stops them being compared.
+        return f"openai_compatible:{self._model}"
 
     @property
     def dimensions(self) -> int:

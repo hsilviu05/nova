@@ -26,6 +26,7 @@ from nova.db.session import create_engine, create_session_factory
 from nova.middleware.errors import register_exception_handlers
 from nova.middleware.hardening import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from nova.middleware.request_context import RequestContextMiddleware
+from nova.repositories.memory import MemoryRepository
 from nova.tools.registry import KnowledgeDependencies, build_registry
 
 logger = get_logger(__name__)
@@ -79,11 +80,25 @@ def _build_lifespan(
             ),
         )
 
+        # A changed embedder leaves the previous rows invisible to
+        # retrieval, which is the safe failure but a quiet one. Say so at
+        # the one moment an operator is looking: startup.
+        async with session_factory() as session:
+            stale = await MemoryRepository(session).count_stale(embedding_provider.name)
+        if stale:
+            logger.warning(
+                "memories_need_reembedding",
+                stale=stale,
+                embedding_provider=embedding_provider.name,
+                fix="python scripts/reembed_memories.py",
+            )
+
         logger.info(
             "api_started",
             version=__version__,
             environment=settings.environment,
             chat_provider=chat_provider.name,
+            embedding_provider=embedding_provider.name,
             tools=len(app.state.tool_registry),
         )
         try:
