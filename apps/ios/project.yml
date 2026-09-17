@@ -100,6 +100,10 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         # Portrait only: the UI is a five-tab phone layout designed for a
         # phone standing in a dock, and there is no landscape design to ship.
+        # The mark from the launch screen, rendered by Tools/make-appicon.swift.
+        # Without these the app installs as a blank white tile.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         # iPhone only (1). Xcode defaults to "1,2", which claims iPad -- and
         # an iPad-capable app that does not require full screen must support

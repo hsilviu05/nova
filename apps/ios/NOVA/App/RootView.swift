@@ -67,11 +67,25 @@ struct MainTabView: View {
 
 /// NOVA's mark: a pair of marks that read as attention rather than a face.
 struct NovaMark: View {
+    /// The mark's geometry, as fractions of `size`.
+    ///
+    /// Named rather than inline because the app icon is the same mark, drawn
+    /// by `Tools/make-appicon.swift` from these numbers. A change here means
+    /// regenerating the icon, and `IconTests` is what says so out loud.
+    enum Proportions {
+        static let barWidth: CGFloat = 0.28
+        static let barHeight: CGFloat = 0.52
+        static let spacing: CGFloat = 0.22
+        static let cornerRadius: CGFloat = 0.16
+        /// Closed, the bars become a pair of slits rather than disappearing.
+        static let asleepHeight: CGFloat = 0.08
+    }
+
     var size: CGFloat = 56
     var isAwake: Bool = true
 
     var body: some View {
-        HStack(spacing: size * 0.22) {
+        HStack(spacing: size * Proportions.spacing) {
             bar
             bar
         }
@@ -80,9 +94,12 @@ struct NovaMark: View {
     }
 
     private var bar: some View {
-        RoundedRectangle(cornerRadius: size * 0.16, style: .continuous)
+        RoundedRectangle(cornerRadius: size * Proportions.cornerRadius, style: .continuous)
             .fill(Color.accentColor)
-            .frame(width: size * 0.28, height: isAwake ? size * 0.52 : size * 0.08)
+            .frame(
+                width: size * Proportions.barWidth,
+                height: size * (isAwake ? Proportions.barHeight : Proportions.asleepHeight)
+            )
     }
 }
 
