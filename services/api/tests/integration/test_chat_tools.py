@@ -592,6 +592,106 @@ class TestHostileToolOutput:
         assert "ghp_abcdef" not in str(provider.requests[1].messages)
 
 
+class TestAModelThatSaysNothing:
+    """A thinking model can spend its whole budget reasoning and emit no
+    visible text. That is a real outcome, not a bug -- but it used to reach
+    `messages.content_not_empty` and come back as a 500 on a database
+    constraint, which tells nobody anything about what happened.
+    """
+
+    async def test_empty_deltas_do_not_crash_the_stream(
+        self,
+        registry: ToolRegistry,
+        settings: Settings,
+        engine: Any,
+        session_factory: Any,
+        redis_client: Any,
+    ) -> None:
+        """The exact shape that broke it.
+
+        `spoken` is a list of deltas, so empty ones leave a truthy list that
+        joins to "" -- the old guard checked the list, not the text.
+        """
+
+        class SaysNothing(ScriptedProvider):
+            async def stream(self, request: ChatRequest) -> AsyncGenerator[StreamEvent, None]:
+                self.requests.append(request)
+                yield TextDelta("")
+                yield TextDelta("")
+                yield StreamCompleted(stop_reason="end_turn", usage=TokenUsage(), model=self.model)
+
+        provider = SaysNothing([])
+
+        async with _client(
+            provider, registry, settings, engine, session_factory, redis_client
+        ) as client:
+            headers, cid = await _conversation(client)
+            body = await _stream(client, headers, cid, "say nothing")
+
+            # The stream completes rather than 500ing.
+            assert "event: done" in body
+
+            # And no empty assistant turn was stored.
+            detail = (await client.get(f"/api/v1/conversations/{cid}", headers=headers)).json()
+            roles = [m["role"] for m in detail["messages"]]
+            assert roles == ["user"]
+
+    async def test_whitespace_only_is_treated_as_nothing(
+        self,
+        registry: ToolRegistry,
+        settings: Settings,
+        engine: Any,
+        session_factory: Any,
+        redis_client: Any,
+    ) -> None:
+        """`length(content) > 0` would accept a space, so the constraint
+        would not catch this -- it would store a blank bubble instead."""
+
+        class Whitespace(ScriptedProvider):
+            async def stream(self, request: ChatRequest) -> AsyncGenerator[StreamEvent, None]:
+                self.requests.append(request)
+                yield TextDelta("  \n ")
+                yield StreamCompleted(stop_reason="end_turn", usage=TokenUsage(), model=self.model)
+
+        async with _client(
+            Whitespace([]), registry, settings, engine, session_factory, redis_client
+        ) as client:
+            headers, cid = await _conversation(client)
+            await _stream(client, headers, cid, "say nothing")
+
+            detail = (await client.get(f"/api/v1/conversations/{cid}", headers=headers)).json()
+            assert [m["role"] for m in detail["messages"]] == ["user"]
+
+    async def test_what_was_said_before_falling_silent_is_still_kept(
+        self,
+        registry: ToolRegistry,
+        settings: Settings,
+        engine: Any,
+        session_factory: Any,
+        redis_client: Any,
+    ) -> None:
+        """The guard must not throw away a real reply that happens to end
+        with an empty delta."""
+
+        class TrailsOff(ScriptedProvider):
+            async def stream(self, request: ChatRequest) -> AsyncGenerator[StreamEvent, None]:
+                self.requests.append(request)
+                yield TextDelta("The disk is fine.")
+                yield TextDelta("")
+                yield StreamCompleted(stop_reason="end_turn", usage=TokenUsage(), model=self.model)
+
+        async with _client(
+            TrailsOff([]), registry, settings, engine, session_factory, redis_client
+        ) as client:
+            headers, cid = await _conversation(client)
+            await _stream(client, headers, cid, "how is the disk")
+
+            detail = (await client.get(f"/api/v1/conversations/{cid}", headers=headers)).json()
+            stored = [m for m in detail["messages"] if m["role"] == "assistant"]
+            assert len(stored) == 1
+            assert stored[0]["content"] == "The disk is fine."
+
+
 class TestTwoDestructiveCallsInOneTurn:
     async def test_each_one_becomes_its_own_confirmation(
         self,

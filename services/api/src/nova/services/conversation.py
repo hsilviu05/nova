@@ -268,6 +268,19 @@ class ConversationService:
         )
         latency_ms = int((time.perf_counter() - started) * 1000)
 
+        if not completion.text.strip():
+            # Unlike the streamed path there is nothing partial to keep and
+            # nothing already sent, so this surfaces as an error rather than
+            # an empty turn. Raised here rather than left to the database:
+            # `messages.content_not_empty` would reject it too, but as an
+            # IntegrityError that reaches the client as a 500 with no cause.
+            raise AIProviderError(
+                "The model returned an empty reply. A thinking model can "
+                "spend its whole token budget reasoning; try the instruct "
+                "variant, or raise max_reply_tokens.",
+                code="ai_empty_reply",
+            )
+
         assistant_message = self.append_message(
             conversation,
             role="assistant",
@@ -535,10 +548,17 @@ class ChatStreamer:
         finally:
             # Also runs when the client disconnects, which cancels the
             # generator: whatever NOVA managed to say is still recorded.
-            if spoken:
+            # Joined before the check, not after. `spoken` is a list of
+            # deltas, so a model that emitted empty ones -- which a thinking
+            # model does when it spends its whole budget reasoning and says
+            # nothing -- leaves a truthy list that joins to "". That reached
+            # `messages.content_not_empty` and came back as a 500 on a
+            # database constraint, which tells nobody anything.
+            reply = "".join(spoken)
+            if reply.strip():
                 await self._persist_reply(
                     conversation_id,
-                    text="".join(spoken),
+                    text=reply,
                     latency_ms=int((time.perf_counter() - started) * 1000),
                     truncated=failed is not None,
                 )
