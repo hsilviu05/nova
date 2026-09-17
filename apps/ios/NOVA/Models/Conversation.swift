@@ -70,6 +70,16 @@ extension ChatMessage {
     }
 }
 
+/// A conversation that matched a search, and where it matched.
+struct ConversationSearchResult: Decodable, Identifiable, Equatable, Sendable {
+    let conversation: Conversation
+    /// An excerpt of the newest message containing the query; nil when only
+    /// the title matched.
+    let snippet: String?
+
+    var id: UUID { conversation.id }
+}
+
 // MARK: - Requests
 
 struct CreateConversationRequest: Encodable, Sendable {

@@ -15,6 +15,7 @@ protocol NovaAPI: Sendable {
     func updateProfile(displayName: String?, timezone: String?) async throws -> User
 
     func conversations() async throws -> [Conversation]
+    func searchConversations(_ query: String) async throws -> [ConversationSearchResult]
     func conversation(id: UUID) async throws -> ConversationDetail
     func createConversation(title: String?) async throws -> Conversation
     func deleteConversation(id: UUID) async throws
@@ -116,6 +117,10 @@ struct LiveNovaAPI: NovaAPI {
 
     func conversations() async throws -> [Conversation] {
         try await client.send(Request(path: "conversations"))
+    }
+
+    func searchConversations(_ query: String) async throws -> [ConversationSearchResult] {
+        try await client.send(Request(path: "conversations/search", query: ["q": query]))
     }
 
     func conversation(id: UUID) async throws -> ConversationDetail {

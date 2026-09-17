@@ -215,6 +215,7 @@ private final class StubAPI: NovaAPI {
     nonisolated func currentUser() async throws -> User { throw APIError.unauthenticated }
     nonisolated func updateProfile(displayName: String?, timezone: String?) async throws -> User { throw APIError.unauthenticated }
     nonisolated func conversations() async throws -> [Conversation] { [] }
+    nonisolated func searchConversations(_ query: String) async throws -> [ConversationSearchResult] { [] }
     nonisolated func conversation(id: UUID) async throws -> ConversationDetail { throw APIError.unauthenticated }
     nonisolated func createConversation(title: String?) async throws -> Conversation { throw APIError.unauthenticated }
     nonisolated func deleteConversation(id: UUID) async throws {}

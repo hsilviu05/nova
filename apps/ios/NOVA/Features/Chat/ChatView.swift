@@ -13,6 +13,7 @@ struct ChatView: View {
 
     @State private var model: ChatModel?
     @State private var draft = ""
+    @State private var isShowingHistory = false
     @FocusState private var isComposing: Bool
 
     var body: some View {
@@ -27,11 +28,32 @@ struct ChatView: View {
             .navigationTitle("NOVA")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("History", systemImage: "clock.arrow.circlepath") {
+                        isShowingHistory = true
+                    }
+                    .disabled(model == nil)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("New", systemImage: "square.and.pencil") {
                         Task { await model?.startNewConversation() }
                     }
                     .disabled(model?.isStreaming ?? true)
+                }
+            }
+            .sheet(isPresented: $isShowingHistory) {
+                if let model {
+                    HistoryView(
+                        api: api,
+                        current: model.conversationID,
+                        onOpen: { id in
+                            isShowingHistory = false
+                            Task { await model.open(id) }
+                        },
+                        onDeleted: { id in
+                            Task { await model.conversationWasDeleted(id) }
+                        }
+                    )
                 }
             }
         }

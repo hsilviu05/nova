@@ -442,7 +442,6 @@ client that silently decodes the wrong thing.
 
 Deliberately not built yet, and each for a reason:
 
-- **Conversation search.** The retrieval is there; the UI is not.
 - **A real embedder.** Lexical retrieval works and has a ceiling.
 - **Local Whisper.** The `SpeechRecogniser` protocol exists precisely so this
   is a new file rather than a refactor.

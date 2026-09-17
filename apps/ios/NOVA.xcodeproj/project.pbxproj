@@ -15,6 +15,7 @@
 		0F4FBAB1ECC5B03270BAD64D /* MemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C64BF77983452BF5A54020A1 /* MemoryView.swift */; };
 		0F8F10D28DCFC316BE4A9CE8 /* NovaAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7BC025DE6DCA7056D192DEF /* NovaAPI.swift */; };
 		1987ADA7EDC40A189F3BE3F2 /* ToolsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72AD83A8123632F2B3683CA7 /* ToolsModel.swift */; };
+		1E834705B89F92FF8B159AF8 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB94C7E97D125A1E2180577 /* HistoryView.swift */; };
 		28EB39D19CF5F054BD01AFAB /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 30B6C985392A9981E35EE211 /* PrivacyInfo.xcprivacy */; };
 		353DE9EF94CE1622456BD091 /* VoiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4FA9D42B09A1BA4BD487838 /* VoiceTests.swift */; };
 		4194D98E9447FF15D10A99DF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2216A5EBCC1192FF9D08E97E /* SettingsView.swift */; };
@@ -25,6 +26,7 @@
 		4CF8B7D3B42EBE128B448831 /* TokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9378DC3C160BA866B68D2035 /* TokenStore.swift */; };
 		5A36410BE25BFCB22D637A9E /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1423E8758C74572D85C4C77E /* APIClient.swift */; };
 		5D00954A6C33EC6DC6058064 /* DashboardModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F2D3EBC9621146C4E903F2 /* DashboardModel.swift */; };
+		5E4A4C2A9F551408878C9649 /* HistoryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C37C444AB817FC3E7AD4BD09 /* HistoryModel.swift */; };
 		5EEDE82923E7ADAA3E044B6D /* Conversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14C608D6A4C52FBF74298581 /* Conversation.swift */; };
 		60DF872F57FF0FE1CB956C42 /* ServerSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB9DC80B7C871BBE18452E58 /* ServerSettingsTests.swift */; };
 		64C4C29A07B661F415511E43 /* DecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14C938C896ABA16481BC1888 /* DecodingTests.swift */; };
@@ -40,6 +42,7 @@
 		A4723F6F10390B66CA906661 /* JSONValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A99C8B7828406BCBB9C5DEAC /* JSONValue.swift */; };
 		A844FF2C3B484E55EBE7B3CC /* ServerSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 495CE657B10641BF0E921038 /* ServerSettings.swift */; };
 		AA82950F6340C2C27F11D857 /* TimezonePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEF40C84B629118B33791DE5 /* TimezonePicker.swift */; };
+		AC104E41968F1A8CCE27F92B /* HistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 652F4ABFBCCA44425458CC40 /* HistoryTests.swift */; };
 		BC6118FC965538C110355C2A /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 541CF0AE688FF8B388D0FB56 /* SignInView.swift */; };
 		C3B711F847383256F052F515 /* MemoryDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54EFE3DED67B42FC763D6A90 /* MemoryDecodingTests.swift */; };
 		C704BCCC7BA2D365A693BDB2 /* TokenStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA6C2179053F740428166109 /* TokenStoreTests.swift */; };
@@ -75,6 +78,7 @@
 		34AB1B510F418016E1418F7F /* ChatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTests.swift; sourceTree = "<group>"; };
 		35A2EDC8DC8EE5D9B33BD5CD /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		3C8CBAA986434101F019745C /* NOVA.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = NOVA.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3CB94C7E97D125A1E2180577 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		4693F2CF189F93C51914CA2F /* SystemStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemStatus.swift; sourceTree = "<group>"; };
 		495CE657B10641BF0E921038 /* ServerSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSettings.swift; sourceTree = "<group>"; };
 		49D57CCD96E6DCA0734D32B3 /* NOVATests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = NOVATests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -84,6 +88,7 @@
 		536A58A1386FC0C90BFBD39F /* Tool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tool.swift; sourceTree = "<group>"; };
 		541CF0AE688FF8B388D0FB56 /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		54EFE3DED67B42FC763D6A90 /* MemoryDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryDecodingTests.swift; sourceTree = "<group>"; };
+		652F4ABFBCCA44425458CC40 /* HistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryTests.swift; sourceTree = "<group>"; };
 		6A0DEE7B42AE7AA9DD27F3D1 /* NOVAApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NOVAApp.swift; sourceTree = "<group>"; };
 		6FCBCEA513BE3CD7E8879605 /* JSONCoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONCoding.swift; sourceTree = "<group>"; };
 		7069B2CE2EA525B5B795A725 /* VoiceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceStore.swift; sourceTree = "<group>"; };
@@ -99,6 +104,7 @@
 		A9F2D3EBC9621146C4E903F2 /* DashboardModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardModel.swift; sourceTree = "<group>"; };
 		AEF40C84B629118B33791DE5 /* TimezonePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimezonePicker.swift; sourceTree = "<group>"; };
 		B0A16E235F00567F34007F03 /* APIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClientTests.swift; sourceTree = "<group>"; };
+		C37C444AB817FC3E7AD4BD09 /* HistoryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryModel.swift; sourceTree = "<group>"; };
 		C64BF77983452BF5A54020A1 /* MemoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryView.swift; sourceTree = "<group>"; };
 		C7BC025DE6DCA7056D192DEF /* NovaAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaAPI.swift; sourceTree = "<group>"; };
 		C81F4F98B003DFC1DD3DA1EE /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
@@ -208,6 +214,7 @@
 				D39C917F5BEBCD1027733876 /* Settings */,
 				FD571A92CBCA77BD04F2E02E /* Tools */,
 				FB005D3AA5354C7F1674EC41 /* Voice */,
+				E35348769C4F46AA34C5CB2E /* History */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -225,6 +232,7 @@
 				721EB62492752AC989F31DE6 /* StubTransport.swift */,
 				DA6C2179053F740428166109 /* TokenStoreTests.swift */,
 				A4FA9D42B09A1BA4BD487838 /* VoiceTests.swift */,
+				652F4ABFBCCA44425458CC40 /* HistoryTests.swift */,
 			);
 			path = NOVATests;
 			sourceTree = "<group>";
@@ -256,6 +264,15 @@
 				AEF40C84B629118B33791DE5 /* TimezonePicker.swift */,
 			);
 			path = Settings;
+			sourceTree = "<group>";
+		};
+		E35348769C4F46AA34C5CB2E /* History */ = {
+			isa = PBXGroup;
+			children = (
+				C37C444AB817FC3E7AD4BD09 /* HistoryModel.swift */,
+				3CB94C7E97D125A1E2180577 /* HistoryView.swift */,
+			);
+			path = History;
 			sourceTree = "<group>";
 		};
 		FB005D3AA5354C7F1674EC41 /* Voice */ = {
@@ -394,6 +411,8 @@
 				F71863FFA2280F33F7510499 /* ToolsView.swift in Sources */,
 				948BE4A410EC31C40AD33888 /* Voice.swift in Sources */,
 				0066730F413092E35EE7349A /* VoiceStore.swift in Sources */,
+				5E4A4C2A9F551408878C9649 /* HistoryModel.swift in Sources */,
+				1E834705B89F92FF8B159AF8 /* HistoryView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -411,6 +430,7 @@
 				00BFDCDE1B11416402E9246D /* StubTransport.swift in Sources */,
 				C704BCCC7BA2D365A693BDB2 /* TokenStoreTests.swift in Sources */,
 				353DE9EF94CE1622456BD091 /* VoiceTests.swift in Sources */,
+				AC104E41968F1A8CCE27F92B /* HistoryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

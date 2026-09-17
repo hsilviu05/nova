@@ -108,6 +108,7 @@ struct SessionStoreTests {
 
         // Not reached from SessionStore.
         nonisolated func conversations() async throws -> [Conversation] { throw APIError.unauthenticated }
+        nonisolated func searchConversations(_ query: String) async throws -> [ConversationSearchResult] { throw APIError.unauthenticated }
         nonisolated func conversation(id: UUID) async throws -> ConversationDetail { throw APIError.unauthenticated }
         nonisolated func createConversation(title: String?) async throws -> Conversation { throw APIError.unauthenticated }
         nonisolated func deleteConversation(id: UUID) async throws { throw APIError.unauthenticated }

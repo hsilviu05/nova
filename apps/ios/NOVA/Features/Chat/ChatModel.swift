@@ -134,6 +134,29 @@ final class ChatModel {
         error = nil
     }
 
+    /// Switch to an existing thread, chosen from history.
+    func open(_ id: UUID) async {
+        guard id != conversationID else { return }
+        cancel()
+        conversationID = id
+        lastSent = nil
+        do {
+            try await loadDetail(id)
+        } catch let apiError as APIError {
+            error = apiError
+        } catch {
+            self.error = .undecodable(status: 0, underlying: "\(error)")
+        }
+    }
+
+    /// Forget a thread that was just deleted. If it was the open one, the
+    /// next send needs a thread to go into, so start a fresh one now rather
+    /// than failing later with a not-found.
+    func conversationWasDeleted(_ id: UUID) async {
+        guard id == conversationID else { return }
+        await startNewConversation()
+    }
+
     /// Begin a new thread, leaving the previous one intact.
     func startNewConversation() async {
         cancel()

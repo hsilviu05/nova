@@ -94,6 +94,7 @@ NOVA/
     ├── Auth/       sign in and register
     ├── Dashboard/  the glanceable screen: AI, machine, projects, memory, tools
     ├── Chat/       streaming replies, tool activity, confirmations
+    ├── History/    past threads, searchable by title or anything said
     ├── Memory/     what NOVA knows, editable and deletable
     ├── Tools/      what NOVA can do, and doing it by hand
     ├── Voice/      speech in and out, off by default
@@ -173,8 +174,6 @@ done with the permission.
 
 ## Known gaps
 
-- **No conversation search or history browser.** One thread at a time, with
-  "New" to start another. The server has the rest.
 - **Tool activity is not persisted in the transcript.** Reopening a thread
   shows what was said, without the machinery. The audit log under
   Dashboard → recent activity is where "what did NOVA run" is answered

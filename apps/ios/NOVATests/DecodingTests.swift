@@ -96,6 +96,34 @@ struct DecodingTests {
         #expect(result.tokens.expiresIn == 899)
     }
 
+    @Test("Decodes a conversation search hit with its snippet")
+    func conversationSearchResult() throws {
+        // A real `GET /api/v1/conversations/search?q=postg` response.
+        let json = """
+        [
+          {
+            "conversation": {
+              "id": "6cd9c37f-553f-49d7-95b2-97dfe8448034",
+              "title": "Which database should I use for the new project? I am…",
+              "message_count": 2,
+              "last_message_at": "2026-09-17T08:51:21.884773Z",
+              "created_at": "2026-09-17T08:51:21.829440Z"
+            },
+            "snippet": "Which database should I use for the new project? I am leaning towards PostgreSQL because of pgvector."
+          }
+        ]
+        """
+
+        let results = try JSONCoding.decoder.decode(
+            [ConversationSearchResult].self, from: Data(json.utf8)
+        )
+
+        #expect(results.count == 1)
+        #expect(results[0].id == results[0].conversation.id)
+        #expect(results[0].conversation.messageCount == 2)
+        #expect(results[0].snippet?.contains("PostgreSQL") == true)
+    }
+
     @Test("Computes an access-token expiry from the issued lifetime")
     func tokenExpiry() {
         let pair = TokenPair(

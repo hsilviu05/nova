@@ -30,6 +30,7 @@ MODELS = {
     "TokenPair": "TokenPair",
     "Conversation": "ConversationRead",
     "ConversationDetail": "ConversationDetail",
+    "ConversationSearchResult": "ConversationSearchResult",
     "ChatMessage": "MessageRead",
     "Memory": "MemoryRead",
     "MemoryPage": "MemoryPage",
