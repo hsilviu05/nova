@@ -15,7 +15,7 @@
 name: NOVA
 
 options:
-  bundleIdPrefix: com.nova
+  bundleIdPrefix: com.hermeneanu
   deploymentTarget:
     # Independent of the SDK: App Store Connect requires building against the
     # iOS 26 SDK, while nothing in this app needs anything newer than 18.
@@ -54,7 +54,16 @@ targets:
       - sdk: AppIntents.framework
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.nova.app
+        # Namespaced to the developer rather than the product. `com.nova.app`
+        # is a name nobody owns, and Apple will refuse to register it to a
+        # team that has not claimed it.
+        PRODUCT_BUNDLE_IDENTIFIER: com.hermeneanu.nova
+        # Set here rather than only in Xcode's UI: Xcode writes the team into
+        # the .xcodeproj, and `xcodegen generate` overwrites that file -- so
+        # signing configured through the UI is silently lost the next time
+        # anybody regenerates.
+        DEVELOPMENT_TEAM: A93FGV7L5Y
+        CODE_SIGN_STYLE: Automatic
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
@@ -110,6 +119,8 @@ targets:
         # content worth reviewing, and without one the bundle cannot be code
         # signed for the simulator.
         GENERATE_INFOPLIST_FILE: YES
-        PRODUCT_BUNDLE_IDENTIFIER: com.nova.app.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.hermeneanu.nova.tests
+        DEVELOPMENT_TEAM: A93FGV7L5Y
+        CODE_SIGN_STYLE: Automatic
     dependencies:
       - target: NOVA
