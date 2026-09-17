@@ -222,6 +222,20 @@ class AISettings(BaseModel):
     # several gigabytes in front of most replies.
     ollama_keep_alive: str = "30m"
 
+    # The context window to allocate, in tokens.
+    #
+    # Ollama sizes the KV cache from this, and when it is not sent it uses
+    # whatever the model advertises -- 131072 for llama3.2, 262144 for
+    # qwen3.8. That turns a 2 GB 3B model into 17.7 GB resident and a 27B
+    # model into more memory than most laptops have, for a context NOVA
+    # never fills: a reply is capped at `max_reply_tokens`, tool output at
+    # `max_output_bytes` per call, and history is the recent turns.
+    #
+    # 16384 leaves room for a system prompt, several rounds of tool output
+    # and a long reply, while costing a fraction of the memory. Raise it if
+    # you paste whole files into a conversation.
+    ollama_context_tokens: int = Field(default=16384, ge=2048, le=262_144)
+
     # Any server speaking the OpenAI chat-completions wire format --
     # llama.cpp, vLLM, LM Studio, or Ollama's compatibility endpoint.
     openai_base_url: str = "http://127.0.0.1:11434/v1"

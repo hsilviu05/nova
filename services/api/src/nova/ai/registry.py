@@ -57,6 +57,7 @@ def build_chat_provider(settings: AISettings) -> ChatProvider:
                 model=settings.chat_model,
                 timeout_seconds=settings.request_timeout_seconds,
                 keep_alive=settings.ollama_keep_alive,
+                context_tokens=settings.ollama_context_tokens,
             )
 
         case "openai_compatible":

@@ -105,7 +105,10 @@ class TestRequestShape:
         assert server.requests[-1].url.path == "/api/chat"
         assert sent["model"] == "qwen2.5:32b"
         assert sent["stream"] is True
-        assert sent["options"] == {"num_predict": 123}
+        # num_ctx as well as num_predict: without it Ollama allocates the
+        # model's full advertised window, which is how a 3B model ends up
+        # holding 17.7 GB.
+        assert sent["options"] == {"num_predict": 123, "num_ctx": 16384}
         # No tools offered means the key is absent, not an empty list: some
         # servers treat [] as "tools are in play" and change the prompt.
         assert "tools" not in sent
@@ -317,6 +320,32 @@ class TestToolDefinitions:
                 },
             }
         ]
+
+    async def test_the_context_window_is_asked_for_explicitly(self) -> None:
+        """Left out, Ollama allocates whatever the model advertises.
+
+        llama3.2 advertises 131072 tokens and qwen3.8 262144, so a 2 GB 3B
+        model arrives at 17.7 GB resident and a 27B model needs more memory
+        than the machine has -- for a window NOVA never fills, since a reply
+        is capped at max_reply_tokens and tool output at max_output_bytes.
+        """
+        server = Server(body=stream_reply("ok"))
+
+        async with aclosing(provider(server, context_tokens=8192).stream(REQUEST)) as events:
+            [event async for event in events]
+
+        assert server.last_json["options"]["num_ctx"] == 8192
+        assert server.last_json["options"]["num_predict"] == REQUEST.max_tokens
+
+    async def test_a_sane_window_is_used_when_none_is_configured(self) -> None:
+        server = Server(body=stream_reply("ok"))
+
+        async with aclosing(provider(server).stream(REQUEST)) as events:
+            [event async for event in events]
+
+        # Big enough for a system prompt, several rounds of tool output and a
+        # long reply; small enough to leave the machine usable.
+        assert server.last_json["options"]["num_ctx"] == 16384
 
     async def test_no_tools_means_no_tools_key(self) -> None:
         """Sending an empty list makes some builds emit a tool call anyway."""

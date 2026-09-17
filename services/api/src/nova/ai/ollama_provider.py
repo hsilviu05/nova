@@ -51,6 +51,7 @@ class OllamaChatProvider:
         model: str,
         timeout_seconds: float = 60.0,
         keep_alive: str = "30m",
+        context_tokens: int = 16384,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         if not model:
@@ -61,6 +62,7 @@ class OllamaChatProvider:
 
         self._model = model
         self._keep_alive = keep_alive
+        self._context_tokens = context_tokens
         self._base_url = base_url.rstrip("/")
         # No overall read timeout: a local model legitimately takes as long
         # as it takes to think, and there is no bill running. Connect and
@@ -188,7 +190,14 @@ class OllamaChatProvider:
             "model": self._model,
             "messages": messages,
             "stream": stream,
-            "options": {"num_predict": request.max_tokens},
+            "options": {
+                "num_predict": request.max_tokens,
+                # Sent explicitly. Left out, Ollama allocates the model's
+                # full advertised window -- 131072 tokens for llama3.2 -- and
+                # a 2 GB model becomes 17.7 GB resident for a context NOVA
+                # never fills.
+                "num_ctx": self._context_tokens,
+            },
             # Ollama unloads an idle model after five minutes by default. A
             # terminal is talked to sporadically, so that default would put a
             # cold load of several gigabytes in front of most replies.
