@@ -161,6 +161,42 @@ Then pull a model and confirm the GPU is actually being used:
 used and the model will be slow in a way no amount of configuration on the
 NOVA side will fix — go back to `nvidia-smi`.
 
+## Sizing the model to the VRAM
+
+`nvidia-smi` prints the card's total memory — the `/ 4096MiB` half of the
+Memory-Usage column. That number, not system RAM, is the budget. On a laptop
+with switchable graphics the display usually runs off the integrated GPU, so
+if `nvidia-smi` shows no processes the whole card is yours.
+
+The weights have to fit, and the KV cache for the context sits alongside
+them. A rough budget: weights, plus a few hundred megabytes per 8k of
+context, plus headroom. Overfill it and Ollama silently moves layers to the
+CPU — the model still answers, just many times slower, which reads as "the
+GPU is disappointing" rather than "the model does not fit".
+
+Sizes are from the registry, and only models that advertise `tools` are
+listed — NOVA needs tool calling, and a model without it describes running a
+command instead of running one.
+
+| Model | Download | Fits 4 GB | Fits 8 GB | Fits 16 GB |
+| --- | --- | --- | --- | --- |
+| `qwen2.5:3b` | 1.9 GB | yes | yes | yes |
+| `llama3.2:3b` | 2.0 GB | yes | yes | yes |
+| `qwen3:4b` | 2.5 GB | yes | yes | yes |
+| `qwen2.5:7b` | 4.7 GB | no | yes | yes |
+| `qwen3:8b` | 5.2 GB | no | yes | yes |
+| `qwen2.5:14b` | 9.0 GB | no | no | yes |
+
+Notably absent: **Gemma.** `gemma3` advertises vision, not tools, so NOVA's
+whole tool system stops working on it regardless of how much VRAM you have.
+Check before pulling anything:
+
+    ollama show <model>        # `tools` must appear under capabilities
+
+On 4 GB, `qwen3:4b` is the most capable that fits, and
+`NOVA_AI__OLLAMA_CONTEXT_TOKENS=8192` leaves room for its KV cache. The
+default of 16384 is sized for a machine with more to spare.
+
 ## On the machine running NOVA
 
 One line, and a restart:
