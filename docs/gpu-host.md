@@ -1,0 +1,133 @@
+# Running the model on another machine
+
+NOVA's tools run in the API process. `git_status` reads the repositories on
+the machine the API is running on, `system_health` reports that machine's
+load, `disk_usage` measures its disk. That is not configuration — it is what
+those tools *are*.
+
+So the split is decided by one question: **which machine do you want NOVA to
+be able to tell you about?** The API belongs there. Only the model moves.
+
+    ┌─────────────────────┐              ┌──────────────────────┐
+    │  Mac                │              │  Linux box + GPU     │
+    │                     │   HTTP       │                      │
+    │  NOVA API ──────────┼─────────────▶│  Ollama :11434       │
+    │  Postgres, Redis    │  :11434      │                      │
+    │  tools run HERE     │              │  weights live here   │
+    └─────────────────────┘              └──────────────────────┘
+              ▲
+              │ :8000
+         ┌────┴────┐
+         │  phone  │
+         └─────────┘
+
+The phone talks to the API. The API talks to the model. Nothing talks to the
+GPU box except the API.
+
+## Why not move everything
+
+Putting the API on the GPU box is simpler to operate and gives you a server
+that survives the laptop closing — but then `git_status` reports on the GPU
+box, which has none of your repositories, and `system_health` describes a
+machine you were not asking about. If that is what you want, move it; NOVA
+runs the same on Linux, and the memory reader is better there (`/proc`
+rather than shelling out to `vm_stat`).
+
+There is no third option where the API is remote and the tools are local.
+That would need NOVA to execute commands on another machine over the
+network, which is the one capability this design spends most of its effort
+not having. See SECURITY.md.
+
+## On the GPU box
+
+Ollama binds `127.0.0.1` by default, which is the single thing that makes
+this not work. It has to listen on the network:
+
+    OLLAMA_HOST=0.0.0.0 ollama serve
+
+On a systemd host, make it stick:
+
+    sudo systemctl edit ollama
+
+    [Service]
+    Environment="OLLAMA_HOST=0.0.0.0"
+
+    sudo systemctl restart ollama
+
+Pull a model the GPU can hold. NOVA needs one that supports tool calling —
+without it the model will describe running a command instead of running one:
+
+    ollama pull qwen2.5:7b
+    ollama show qwen2.5:7b        # `tools` must appear under capabilities
+
+Confirm it is actually on the GPU rather than quietly on the CPU:
+
+    ollama run qwen2.5:7b hi
+    ollama ps                     # PROCESSOR should say GPU, not CPU
+
+Open the port on the host firewall, and give the machine a DHCP reservation
+so its address does not move.
+
+### Bazzite, and other immutable distributions
+
+Bazzite is `rpm-ostree`-based, so there is no `dnf install ollama` that
+survives. Two routes, both fine:
+
+- `ujust` — Bazzite ships recipes for common things; `ujust --choose` and
+  look for an Ollama entry. This is the path of least resistance.
+- A container with GPU passthrough, which is what the OS is designed around:
+
+      podman run -d --replace --name ollama \
+          --device nvidia.com/gpu=all \
+          --security-opt=label=disable \
+          -p 11434:11434 \
+          -v ollama:/root/.ollama \
+          -e OLLAMA_HOST=0.0.0.0 \
+          docker.io/ollama/ollama
+
+  `--device nvidia.com/gpu=all` needs CDI to be generated once:
+
+      sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+      nvidia-ctk cdi list           # nvidia.com/gpu=all should appear
+
+  On a Bazzite NVIDIA image the driver and toolkit are already present. On a
+  non-NVIDIA image they are not, and no amount of container configuration
+  will conjure them — check `nvidia-smi` first.
+
+## On the machine running NOVA
+
+One line, and a restart:
+
+    # .env
+    NOVA_AI__CHAT_PROVIDER=ollama
+    NOVA_AI__CHAT_MODEL=qwen2.5:7b
+    NOVA_AI__OLLAMA_BASE_URL=http://<gpu-box>:11434
+
+Nothing else changes. `ollama_base_url` is used exactly as given — there is
+no loopback special case — so a LAN address, a `.local` name or a hostname
+all work.
+
+Two settings worth revisiting once the model is remote:
+
+- `NOVA_AI__OLLAMA_CONTEXT_TOKENS` (default 16384). NOVA sends this as
+  `num_ctx`; without it Ollama allocates whatever the model advertises,
+  which is 131072 for llama3.2 and 262144 for qwen3.8 — enough to turn a
+  2 GB model into 17.7 GB resident. With a GPU you have more room, but the
+  ceiling is VRAM rather than system memory now.
+- `NOVA_AI__OLLAMA_KEEP_ALIVE` (default 30m). On a dedicated box, longer is
+  better: the machine has nothing else to do with the memory, and a warm
+  model is the difference between a reply and a five-second stare.
+
+## Checking it
+
+From the machine running NOVA, not from the GPU box:
+
+    curl http://<gpu-box>:11434/api/tags          # the model is listed
+    curl http://localhost:8000/api/v1/system/status \
+        -H "Authorization: Bearer <token>"        # ai.online is true
+
+If `ai.online` is false, the `detail` field says which of the two it is: a
+provider that cannot be reached, or one that did not answer inside the
+dashboard's six-second probe budget. A cold load on a first request often
+exceeds that — ask it something once from the GPU box before believing the
+card.

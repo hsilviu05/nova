@@ -496,6 +496,7 @@ shell access, multi-agent orchestration, Kubernetes, public deployment.
 | [docs/security-review.md](docs/security-review.md) | Self-review findings; predates the tool system |
 | [docs/performance.md](docs/performance.md) | What was measured, before and after |
 | [docs/deployment.md](docs/deployment.md) | Single-host production: TLS, release images, backups |
+| [docs/gpu-host.md](docs/gpu-host.md) | Running the model on another machine, and why the tools stay put |
 | [docs/decisions/](docs/decisions/) | ADRs, including the ones this refactor superseded |
 
 ---
